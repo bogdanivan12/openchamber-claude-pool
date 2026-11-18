@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Fix: the pool state keeps fields it does not know. An older service or plugin process rewriting `state.json` used to drop the new conversation activity, so busy accounts flickered back to grey. Restart OpenChamber after updating so every process runs the same version.
+
 ## 0.2.0
 
 - Real usage in the panel and Work Status: the account list now refreshes 5h and 7d usage (at most every 45 s) instead of showing an empty stored state.

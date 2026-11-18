@@ -91,3 +91,15 @@ describe("conversation activity", () => {
     expect(activeConversations({ ...s, conversations: { old: { accountId: "aaaaaa", at: 1 } } }, now)).toEqual({});
   });
 });
+
+describe("state schema", () => {
+  it("keeps fields it does not know, so another version's writes survive a read-modify-write", () => {
+    const d = dir();
+    writeFileSync(join(d, "state.json"), JSON.stringify({ version: 1, future: 1, accounts: { a: { windows: {}, limitedUntil: null, needsLogin: false, extra: "x" } }, conversations: { c: { accountId: "a", at: 1, activeAt: 5, other: true } } }));
+    updateState((s) => { s.accounts.a.needsLogin = true; }, d, 2);
+    const raw = JSON.parse(require("node:fs").readFileSync(join(d, "state.json"), "utf8"));
+    expect(raw.future).toBe(1);
+    expect(raw.accounts.a.extra).toBe("x");
+    expect(raw.conversations.c).toMatchObject({ activeAt: 5, other: true });
+  });
+});

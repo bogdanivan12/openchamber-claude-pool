@@ -7,15 +7,15 @@ export const CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
 export const ACTIVE_WINDOW_MS = 5 * 60_000;
 
 const windowSchema = z.object({ usedPercent: z.number().min(0).max(100), resetsAt: z.number().nullable(), updatedAt: z.number() });
-const accountSchema = z.object({
+const accountSchema = z.looseObject({
   windows: z.object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
   limitedUntil: z.number().nullable(),
   needsLogin: z.boolean(),
 });
-const stateSchema = z.object({
+const stateSchema = z.looseObject({
   version: z.literal(1),
   accounts: z.record(z.string(), accountSchema),
-  conversations: z.record(z.string(), z.object({ accountId: z.string(), at: z.number(), activeAt: z.number().optional() })),
+  conversations: z.record(z.string(), z.looseObject({ accountId: z.string(), at: z.number(), activeAt: z.number().optional() })),
 });
 
 export type WindowName = "five_hour" | "seven_day";

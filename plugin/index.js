@@ -57393,15 +57393,15 @@ init_zod();
 var CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
 var ACTIVE_WINDOW_MS = 5 * 60000;
 var windowSchema = object({ usedPercent: number2().min(0).max(100), resetsAt: number2().nullable(), updatedAt: number2() });
-var accountSchema2 = object({
+var accountSchema2 = looseObject({
   windows: object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
   limitedUntil: number2().nullable(),
   needsLogin: boolean2()
 });
-var stateSchema = object({
+var stateSchema = looseObject({
   version: literal(1),
   accounts: record(string2(), accountSchema2),
-  conversations: record(string2(), object({ accountId: string2(), at: number2(), activeAt: number2().optional() }))
+  conversations: record(string2(), looseObject({ accountId: string2(), at: number2(), activeAt: number2().optional() }))
 });
 var emptyState = () => ({ version: 1, accounts: {}, conversations: {} });
 function readState2(dataDir = poolDataDir()) {
