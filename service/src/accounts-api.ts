@@ -48,7 +48,11 @@ export function accountRoutes(deps: {
   cliFound?: () => Promise<boolean>;
   logout?: (dir: string) => Promise<void>;
   rm?: (path: string) => void;
+  /** Refreshes real usage (5h/7d) before the list is answered; throttled. Absent = no refresh (tests). */
+  refreshUsage?: () => Promise<unknown>;
 } = {}): Record<string, Route> {
+  let lastRefresh = 0;
+  const REFRESH_EVERY_MS = 45_000;
   const cliFound = deps.cliFound ?? (async () => (await resolveClaudeCli(process.env)) !== null);
   const dataDir = deps.dataDir ?? poolDataDir();
   const home = deps.home ?? homedir();
@@ -59,6 +63,10 @@ export function accountRoutes(deps: {
 
   return {
     "GET /api/accounts": async () => {
+      if (deps.refreshUsage && Date.now() - lastRefresh > REFRESH_EVERY_MS) {
+        lastRefresh = Date.now();
+        try { await deps.refreshUsage(); } catch { /* keep the last known numbers */ }
+      }
       const found = await cliFound();
       const file = readAccounts(dataDir);
       const state = readState(dataDir);

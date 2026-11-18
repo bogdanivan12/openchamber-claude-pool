@@ -6627,6 +6627,8 @@ function uniqueLabel(base, taken) {
   return label;
 }
 function accountRoutes(deps = {}) {
+  let lastRefresh = 0;
+  const REFRESH_EVERY_MS = 45000;
   const cliFound = deps.cliFound ?? (async () => await resolveClaudeCli(process.env) !== null);
   const dataDir = deps.dataDir ?? poolDataDir();
   const home = deps.home ?? homedir4();
@@ -6636,6 +6638,12 @@ function accountRoutes(deps = {}) {
   const rm = deps.rm ?? ((path) => rmSync(path, { recursive: true, force: true }));
   return {
     "GET /api/accounts": async () => {
+      if (deps.refreshUsage && Date.now() - lastRefresh > REFRESH_EVERY_MS) {
+        lastRefresh = Date.now();
+        try {
+          await deps.refreshUsage();
+        } catch {}
+      }
       const found = await cliFound();
       const file = readAccounts(dataDir);
       const state = readState(dataDir);
@@ -7618,7 +7626,7 @@ var routes = {
   "GET /health": () => ({ status: 200, body: { ok: true } })
 };
 routes["POST /quota"] = quotaRoute();
-Object.assign(routes, accountRoutes());
+Object.assign(routes, accountRoutes({ refreshUsage: () => refreshAllUsage() }));
 Object.assign(routes, loginRoutes());
 
 // service/src/main.ts
