@@ -1,0 +1,45 @@
+{
+  "name": "openchamber-claude-pool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Any number of Claude subscriptions in OpenChamber: a failover pool, one provider per account, and a usage card for all of them.",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=2.7.0" },
+    "contributes": {
+      "panel": { "id": "claude-pool", "name": "Claude Pool", "icon": "stack-line", "entry": "ui/panel/index.html" },
+      "statusSection": { "entry": "ui/status/index.html", "title": "Claude Pool", "height": 96 },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": ["quota"],
+        "permissions": { "exec": ["claude", "security"] }
+      },
+      "quota": { "providers": [] },
+      "opencodePlugin": "plugin"
+    }
+  },
+  "scripts": {
+    "test:shared": "bun test shared service ui",
+    "test:plugin": "bun plugin/test/run.ts",
+    "test": "bun run test:shared && bun run test:plugin",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "bun scripts/build.ts",
+    "check:bundles": "bun scripts/check-bundles.ts",
+    "check:guest": "openchamber-guest-check ."
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.224",
+    "@openchamber/sdk": "2.7.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.0.16",
+    "@types/bun": "^1.3.11",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "bun@1.4.4"
+}

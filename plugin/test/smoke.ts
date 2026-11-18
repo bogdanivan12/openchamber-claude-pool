@@ -2414,16 +2414,7 @@ async function main() {
 
   await stopProxy();
 
-  // TypeScript build
-  const build = spawnSync("bun", ["run", "build"], {
-    cwd: new URL("..", import.meta.url).pathname,
-    encoding: "utf8",
-  });
-  if (build.status !== 0) {
-    console.error(build.stdout);
-    console.error(build.stderr);
-    throw new Error("build failed");
-  }
+  // The TypeScript build step moved to the root package: `bun run check`.
 
   console.log("ok — opencode-claude smoke tests passed");
 }
