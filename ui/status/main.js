@@ -1970,119 +1970,6 @@ var UI_CSS = `
 ${GUEST_SCROLLBAR_CSS}
 ${UI_SIZE_CSS}
 ${GUEST_UI_LOOK_CSS}`;
-// node_modules/@openchamber/sdk/dist/ui/dom.js
-var STYLE_ID = "oc-sdk-ui-style";
-var ensureStyle = (css) => {
-  const existing = document.getElementById(STYLE_ID);
-  if (existing instanceof HTMLStyleElement) {
-    if (existing.textContent !== css) {
-      existing.textContent = css;
-    }
-    return;
-  }
-  installGuestScrollbarActivity(document);
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = css;
-  document.head.appendChild(style);
-};
-var el = (tag, className) => {
-  const node = document.createElement(tag);
-  if (className) {
-    node.className = className;
-  }
-  return node;
-};
-var setText = (node, text) => {
-  const next = text ?? "";
-  if (node.textContent !== next) {
-    node.textContent = next;
-  }
-};
-var setAttr = (node, name, value) => {
-  if (value === undefined || value === null || value === "") {
-    node.removeAttribute(name);
-  } else if (node.getAttribute(name) !== value) {
-    node.setAttribute(name, value);
-  }
-};
-// node_modules/@openchamber/sdk/dist/ui/icons.js
-var SVG_NS = "http://www.w3.org/2000/svg";
-var ICON_PATH = {
-  search: "M18.031 16.617l4.283 4.282-1.415 1.415-4.282-4.283A8.96 8.96 0 0 1 11 20c-4.968 0-9-4.032-9-9s4.032-9 9-9 9 4.032 9 9a8.96 8.96 0 0 1-1.969 5.617zm-2.006-.742A6.977 6.977 0 0 0 18 11c0-3.868-3.133-7-7-7-3.868 0-7 3.132-7 7 0 3.867 3.132 7 7 7a6.977 6.977 0 0 0 4.875-1.975l.15-.15z",
-  chevron: "M12 13.172l4.95-4.95 1.414 1.414L12 16 5.636 9.636 7.05 8.222z",
-  check: "M10 15.172l9.192-9.193 1.415 1.414L10 18l-6.364-6.364 1.414-1.414z",
-  close: "M12 10.586l4.95-4.95 1.414 1.414-4.95 4.95 4.95 4.95-1.414 1.414-4.95-4.95-4.95 4.95-1.414-1.414 4.95-4.95-4.95-4.95L7.05 5.636z"
-};
-var icon = (name, size, className) => {
-  const node = document.createElementNS(SVG_NS, "svg");
-  node.setAttribute("viewBox", "0 0 24 24");
-  node.setAttribute("width", String(size));
-  node.setAttribute("height", String(size));
-  node.style.width = len(size);
-  node.style.height = len(size);
-  node.setAttribute("aria-hidden", "true");
-  node.setAttribute("fill", "currentColor");
-  if (className) {
-    node.setAttribute("class", className);
-  }
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", ICON_PATH[name]);
-  node.append(path);
-  return node;
-};
-// node_modules/@openchamber/sdk/dist/ui/badge.js
-var applyTone = (node, tone) => {
-  setAttr(node, "data-tone", tone && tone !== "neutral" ? tone : null);
-};
-// node_modules/@openchamber/sdk/dist/ui/progress.js
-var clampProgress = (value) => Number.isFinite(value) ? Math.min(100, Math.max(0, Math.floor(value))) : 0;
-var mountProgress = (root, initial) => {
-  ensureStyle(UI_CSS);
-  let props = initial;
-  const node = el("div", "oc-sdk oc-sdk-progress");
-  const caption = el("div", "oc-sdk-progress-label");
-  const label = el("span");
-  const percent = el("span", "oc-sdk-progress-value");
-  const percentText = el("span");
-  const doneMark = icon("check", 14);
-  percent.append(doneMark, percentText);
-  caption.append(label, percent);
-  const track = el("div", "oc-sdk-progress-track");
-  track.setAttribute("role", "progressbar");
-  track.setAttribute("aria-valuemin", "0");
-  track.setAttribute("aria-valuemax", "100");
-  const fill = el("div", "oc-sdk-progress-fill");
-  track.append(fill);
-  node.append(caption, track);
-  root.append(node);
-  const paint = () => {
-    const value = clampProgress(props.value);
-    applyTone(fill, props.tone);
-    fill.style.transform = `scaleX(${value / 100})`;
-    track.setAttribute("aria-valuenow", String(value));
-    if (props.label)
-      track.setAttribute("aria-label", props.label);
-    else
-      track.removeAttribute("aria-label");
-    setText(label, props.label);
-    setText(percentText, `${value}%`);
-    const done = value === 100 && (!props.tone || props.tone === "neutral");
-    setAttr(node, "data-done", done ? "true" : null);
-    doneMark.style.display = done ? "" : "none";
-    caption.hidden = !props.label;
-  };
-  paint();
-  return {
-    update: (next) => {
-      props = { ...props, ...next };
-      paint();
-    },
-    dispose: () => {
-      node.remove();
-    }
-  };
-};
 // ui/shared/api.ts
 function errorText2(v) {
   if (typeof v === "string")
@@ -2178,21 +2065,39 @@ var el2 = (tag, cls = "", text = "") => {
 };
 var line = (text, cls = "muted") => el2("span", `line ${cls}`, text);
 var MIN_HEIGHT = 24;
+var clock = (t, withDay) => {
+  const d = new Date(t);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return withDay ? `${d.toLocaleDateString("en-US", { weekday: "short" })} ${time}` : time;
+};
+function windowLine(label, a, name, now) {
+  const w = a.state?.windows[name];
+  if (!w)
+    return null;
+  const percent = Math.round(windowPercent(a.state, name, now));
+  const left = el2("span", "win-label");
+  left.append(el2("span", "", label));
+  if (w.resetsAt !== null && w.resetsAt > now)
+    left.append(el2("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
+  const tone = percent >= 90 ? "pct error" : "pct";
+  const l = el2("div", "win");
+  l.append(left, el2("span", tone, `${percent}%`));
+  return l;
+}
 function row(a, now, out) {
-  const name = el2("span", a.poolActive ? "active" : "", (a.poolActive ? "● " : "") + a.label);
-  const bar = el2("div");
-  const five = windowPercent(a.state, "five_hour", now);
-  mountProgress(bar, { value: five, tone: five >= 90 ? "error" : five >= 70 ? "warning" : "primary" });
+  const name = el2("span", `name${a.poolActive ? " active" : ""}`, (a.poolActive ? "● " : "") + a.label);
   const badge = statusBadge(a, now);
-  let note;
+  const head = el2("div", "head");
+  head.append(name);
   if (badge.tone === "error")
-    note = el2("span", "muted error", badge.label.toLowerCase());
+    head.append(el2("span", "note error", badge.label.toLowerCase()));
   else if (badge.tone === "warning")
-    note = el2("span", "muted warning", badge.label.toLowerCase());
-  else
-    note = el2("span", "muted", `5h ${Math.round(five)}% · 7d ${Math.round(windowPercent(a.state, "seven_day", now))}%`);
+    head.append(el2("span", "note warning", badge.label.toLowerCase()));
   const r = el2("div", "row");
-  r.append(name, bar, note);
+  r.append(head);
+  for (const l of [windowLine("5-Hour", a, "five_hour", now), windowLine("7-Day Limit", a, "seven_day", now)])
+    if (l)
+      r.append(l);
   out.push(r);
 }
 function createStatus(host, root, opts = {}) {

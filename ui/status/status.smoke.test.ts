@@ -56,9 +56,11 @@ describe("status section smoke test (happy-dom, fake service)", () => {
     expect(first.textContent).toContain("● work");
     expect(first.querySelector(".active")?.textContent).toContain("work");
     expect(second.textContent).not.toContain("●");
-    expect(first.textContent).toContain("5h 72% · 7d 10%");
-    const bar = first.querySelector('[role="progressbar"]') as HTMLElement | null;
-    expect(bar?.getAttribute("aria-valuenow")).toBe("72");
+    const [five, seven] = Array.from(first.querySelectorAll(".win"));
+    expect(five.textContent).toContain("5-Hour");
+    expect(five.querySelector(".pct")?.textContent).toBe("72%");
+    expect(seven.textContent).toContain("7-Day Limit");
+    expect(seven.querySelector(".pct")?.textContent).toBe("10%");
   });
 
   it("shows sign in again for needsLogin and the time left when limited", async () => {
@@ -108,7 +110,7 @@ describe("status section smoke test (happy-dom, fake service)", () => {
     btn.click();
     await settle();
     expect(svc.find("GET", "/api/accounts").length).toBe(2);
-    expect(text(root)).toContain("5h 50%");
+    expect(text(root)).toContain("50%");
     expect(rows().length).toBe(1);
   });
 

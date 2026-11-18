@@ -1,5 +1,5 @@
 import type { HostReadyContext } from "@openchamber/sdk";
-import { applyHostReady, mountProgress } from "@openchamber/sdk/ui";
+import { applyHostReady } from "@openchamber/sdk/ui";
 import { api, type Host } from "../shared/api.ts";
 import { statusBadge, windowPercent, type AccountView } from "../shared/format.ts";
 
@@ -19,18 +19,36 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = "") 
 const line = (text: string, cls = "muted") => el("span", `line ${cls}`, text);
 const MIN_HEIGHT = 24;
 
+const clock = (t: number, withDay: boolean): string => {
+  const d = new Date(t);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return withDay ? `${d.toLocaleDateString("en-US", { weekday: "short" })} ${time}` : time;
+};
+
+/** One usage line in the look of the built-in Usage block: small label, reset time, then the used share. */
+function windowLine(label: string, a: AccountView, name: "five_hour" | "seven_day", now: number): HTMLElement | null {
+  const w = a.state?.windows[name];
+  if (!w) return null;
+  const percent = Math.round(windowPercent(a.state, name, now));
+  const left = el("span", "win-label");
+  left.append(el("span", "", label));
+  if (w.resetsAt !== null && w.resetsAt > now) left.append(el("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
+  const tone = percent >= 90 ? "pct error" : "pct";
+  const l = el("div", "win");
+  l.append(left, el("span", tone, `${percent}%`));
+  return l;
+}
+
 function row(a: AccountView, now: number, out: Element[]): void {
-  const name = el("span", a.poolActive ? "active" : "", (a.poolActive ? "● " : "") + a.label);
-  const bar = el("div");
-  const five = windowPercent(a.state, "five_hour", now);
-  mountProgress(bar, { value: five, tone: five >= 90 ? "error" : five >= 70 ? "warning" : "primary" });
+  const name = el("span", `name${a.poolActive ? " active" : ""}`, (a.poolActive ? "● " : "") + a.label);
   const badge = statusBadge(a, now);
-  let note: HTMLElement;
-  if (badge.tone === "error") note = el("span", "muted error", badge.label.toLowerCase());
-  else if (badge.tone === "warning") note = el("span", "muted warning", badge.label.toLowerCase());
-  else note = el("span", "muted", `5h ${Math.round(five)}% · 7d ${Math.round(windowPercent(a.state, "seven_day", now))}%`);
+  const head = el("div", "head");
+  head.append(name);
+  if (badge.tone === "error") head.append(el("span", "note error", badge.label.toLowerCase()));
+  else if (badge.tone === "warning") head.append(el("span", "note warning", badge.label.toLowerCase()));
   const r = el("div", "row");
-  r.append(name, bar, note);
+  r.append(head);
+  for (const l of [windowLine("5-Hour", a, "five_hour", now), windowLine("7-Day Limit", a, "seven_day", now)]) if (l) r.append(l);
   out.push(r);
 }
 
