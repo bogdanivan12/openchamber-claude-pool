@@ -122,6 +122,10 @@ export function recordRateLimitInfo(
   const raw = info as Record<string, unknown>;
   const prev = readState(configDir) ?? { limited: false, updatedAt: 0 };
   const resetsAtSec = asNumber(raw.resetsAt);
+  // A reset time belongs to one window: when the window type changes, the old
+  // reset must not carry over (a 5h window would show the weekly reset).
+  const eventType = asString(raw.rateLimitType);
+  const windowChanged = eventType !== undefined && eventType !== prev.rateLimitType;
   const next: ClaudeRateLimitState = {
     ...prev,
     status: asString(raw.status) ?? prev.status,
@@ -142,7 +146,9 @@ export function recordRateLimitInfo(
         ? resetsAtSec > 1e12
           ? resetsAtSec // already ms
           : resetsAtSec * 1000 // SDK emits epoch seconds
-        : prev.resetsAt,
+        : windowChanged
+          ? undefined
+          : prev.resetsAt,
     updatedAt: Date.now(),
   };
   // Claude reports the window open again (reset time passed, or the user
