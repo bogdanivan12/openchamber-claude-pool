@@ -152,4 +152,21 @@ describe("accounts", () => {
     expect(() => readWithRetry(() => { calls++; throw Object.assign(new Error("x"), { code: "EISDIR" }); }, () => {})).toThrow("x");
     expect(calls).toBe(1);
   });
+
+  it("findByConfigDir compares case-insensitively on win32 only", () => {
+    const file = { ...emptyAccounts(), accounts: [{ id: "a1b2c3", label: "a", configDir: join(homedir(), ".Claude-X"), order: 0, enabled: true }] };
+    const other = join(homedir(), ".claude-x");
+    expect(findByConfigDir(file, other, "win32")?.id).toBe("a1b2c3");
+    expect(findByConfigDir(file, other, "linux")).toBeUndefined();
+  });
+
+  it("the duplicate configDir check follows the platform's case rules", () => {
+    const d = dir();
+    const run = () => updateAccounts((f) => {
+      f.accounts.push({ id: "a1b2c3", label: "a", configDir: join(d, "X"), order: 0, enabled: true });
+      f.accounts.push({ id: "d4e5f6", label: "b", configDir: join(d, "x"), order: 1, enabled: true });
+    }, d);
+    if (process.platform === "win32") expect(run).toThrow("duplicate configDir");
+    else expect(run).not.toThrow();
+  });
 });

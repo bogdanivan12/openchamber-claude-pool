@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import {
   accountsFile, defaultConfigDir, isDefaultConfigDir, isInsidePoolAccounts,
-  keychainService, newAccountDir, normalizeDir, poolDataDir, stateFile,
+  keychainService, newAccountDir, normalizeDir, poolDataDir, sameDir, stateFile,
 } from "./paths.ts";
 
 const HOME = process.platform === "win32" ? "C:\\Users\\u" : "/Users/u";
@@ -50,5 +50,20 @@ describe("paths", () => {
     expect(isInsidePoolAccounts(join(HOME, ".claude-b"), d)).toBe(false);
     expect(isInsidePoolAccounts(join(d, "accounts"), d)).toBe(false);
     expect(isInsidePoolAccounts(join(d, "accounts", "..x"), d)).toBe(true);
+  });
+
+  it("sameDir ignores case on win32 only", () => {
+    const a = join(HOME, ".Claude-B");
+    const b = join(HOME, ".claude-b");
+    expect(sameDir(a, b, HOME, "win32")).toBe(true);
+    expect(sameDir(a, b, HOME, "linux")).toBe(false);
+    expect(sameDir(a, b, HOME, "darwin")).toBe(false);
+    expect(sameDir(a, a + "/", HOME, "linux")).toBe(true);
+    expect(sameDir(join(HOME, ".claude-b"), join(HOME, ".claude-c"), HOME, "win32")).toBe(false);
+  });
+
+  it("isDefaultConfigDir honours the injected platform", () => {
+    expect(isDefaultConfigDir(join(HOME, ".CLAUDE"), HOME, "win32")).toBe(true);
+    expect(isDefaultConfigDir(join(HOME, ".CLAUDE"), HOME, "linux")).toBe(false);
   });
 });

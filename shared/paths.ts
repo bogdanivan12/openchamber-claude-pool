@@ -24,8 +24,15 @@ export function normalizeDir(p: string, home: string = homedir()): string {
   return out;
 }
 
-export const isDefaultConfigDir = (dir: string, home: string = homedir()): boolean =>
-  normalizeDir(dir, home) === defaultConfigDir(home);
+/** Same directory after normalizing; case-insensitive on Windows only. */
+export function sameDir(a: string, b: string, home: string = homedir(), platform: NodeJS.Platform = process.platform): boolean {
+  const x = normalizeDir(a, home);
+  const y = normalizeDir(b, home);
+  return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+
+export const isDefaultConfigDir = (dir: string, home: string = homedir(), platform: NodeJS.Platform = process.platform): boolean =>
+  sameDir(dir, defaultConfigDir(home), home, platform);
 
 /** Claude Code keys a non-default config dir's Keychain item by sha256 of the exact dir string. */
 export function keychainService(configDir: string, home: string = homedir()): string {

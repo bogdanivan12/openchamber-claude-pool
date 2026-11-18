@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { resolveClaudeCli } from "../../plugin/src/executable-path.ts";
 import { MAX_THRESHOLD, MIN_THRESHOLD, enabledAccounts, newAccountId, readAccounts, updateAccounts, type Account } from "../../shared/accounts.ts";
 import { readCredential } from "../../shared/creds.ts";
-import { accountsFile, isInsidePoolAccounts, normalizeDir, poolDataDir } from "../../shared/paths.ts";
+import { accountsFile, isInsidePoolAccounts, normalizeDir, poolDataDir, sameDir } from "../../shared/paths.ts";
 import { route } from "../../shared/router.ts";
 import { readState } from "../../shared/state.ts";
 import { logoutDir, readAuthStatus } from "./auth-status.ts";
@@ -106,7 +106,7 @@ export function accountRoutes(deps: {
         if (!raw.trim()) return bad("configDirs must not contain empty folders");
         const dir = normalizeDir(raw, home);
         try {
-          const taken = (f: { accounts: Account[] }) => f.accounts.some((a) => normalizeDir(a.configDir, home) === dir);
+          const taken = (f: { accounts: Account[] }) => f.accounts.some((a) => sameDir(a.configDir, dir, home));
           if (taken(readAccounts(dataDir))) {
             skipped.push({ configDir: dir, reason: "already in the pool" });
             continue;

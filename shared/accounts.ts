@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, renameSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { accountsFile, defaultConfigDir, lockFile, normalizeDir, poolDataDir } from "./paths.ts";
+import { accountsFile, defaultConfigDir, lockFile, normalizeDir, poolDataDir, sameDir } from "./paths.ts";
 import { readJsonFile, sleepSync, withLock, writeJsonAtomic } from "./store-io.ts";
 
 export const DEFAULT_THRESHOLD = 90;
@@ -127,7 +127,7 @@ export function updateAccounts(mutate: (file: AccountsFile) => void, dataDir: st
     mutate(file);
     checkConfigDirs(file);
     for (const a of file.accounts) a.configDir = normalizeDir(a.configDir);
-    if (new Set(file.accounts.map((a) => a.configDir)).size !== file.accounts.length) {
+    if (file.accounts.some((a, i) => file.accounts.some((b, j) => i < j && sameDir(a.configDir, b.configDir)))) {
       throw new Error("duplicate configDir");
     }
     const valid = parse(file);
@@ -147,7 +147,7 @@ export function newAccountId(taken: Iterable<string>): string {
 export const enabledAccounts = (file: AccountsFile): Account[] =>
   file.accounts.filter((a) => a.enabled).sort((a, b) => a.order - b.order);
 
-export function findByConfigDir(file: AccountsFile, dir: string | undefined): Account | undefined {
-  const wanted = normalizeDir(dir ?? defaultConfigDir());
-  return file.accounts.find((a) => normalizeDir(a.configDir) === wanted);
+export function findByConfigDir(file: AccountsFile, dir: string | undefined, platform: NodeJS.Platform = process.platform): Account | undefined {
+  const wanted = dir ?? defaultConfigDir();
+  return file.accounts.find((a) => sameDir(a.configDir, wanted, undefined, platform));
 }
