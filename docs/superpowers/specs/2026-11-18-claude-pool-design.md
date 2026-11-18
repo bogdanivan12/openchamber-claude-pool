@@ -82,8 +82,8 @@ Data dir: `~/.claude-pool/` on macOS and `%USERPROFILE%\.claude-pool\` on Window
   "accounts": {
     "a1b2c3": {
       "windows": {
-        "five_hour": { "utilization": 0.42, "resetsAt": 1763500000000 },
-        "seven_day": { "utilization": 0.71, "resetsAt": 1763900000000 }
+        "five_hour": { "usedPercent": 42, "resetsAt": 1763500000000, "updatedAt": 1763480000000 },
+        "seven_day": { "usedPercent": 71, "resetsAt": 1763900000000, "updatedAt": 1763480000000 }
       },
       "limitedUntil": null,
       "needsLogin": false,
@@ -95,6 +95,7 @@ Data dir: `~/.claude-pool/` on macOS and `%USERPROFILE%\.claude-pool\` on Window
 }
 ```
 
+- `usedPercent` is always 0..100 (the SDK's 0..1 `utilization` is multiplied by 100 on write). Window names are `five_hour` and `seven_day`, as the SDK's `rateLimitType` names them.
 - Writers: the plugin (from `rate_limit_event`, from limit errors, from conversation bindings) and the service (from `/api/oauth/usage`). For each window, the newer `updatedAt` wins.
 - All writes go temp file + rename, under `state.lock`, created with exclusive create. A lock older than 10 seconds is taken over.
 - A `state.json` that does not parse is discarded and rebuilt. An `accounts.json` that does not parse is renamed to `.bak`, and the UI reports it.
@@ -115,10 +116,10 @@ Every provider gets the same model list (discovered through the CLI, as today). 
 
 Input: accounts, state, now, threshold, and the conversation's current account (if any). Output: an account id, or "none available" with the earliest reset.
 
-An account is **available** when it is enabled, `needsLogin` is false, `limitedUntil` is null or past, and every window with a future `resetsAt` has `utilization * 100 < threshold`. A window whose `resetsAt` is past counts as 0.
+An account is **available** when it is enabled, `needsLogin` is false, `limitedUntil` is null or past, and every window with a future `resetsAt` has `usedPercent < threshold`. A window whose `resetsAt` is past counts as 0.
 
 1. If the conversation has a current account and it is available, keep it (sticky; keeps the prompt cache warm).
-2. Otherwise pick the available account with the largest headroom, defined as `min over windows of (threshold - utilization*100)`. Ties go to the lower `order`.
+2. Otherwise pick the available account with the largest headroom, defined as `min over windows of (threshold - usedPercent)`. Ties go to the lower `order`.
 3. If none is available, the result is "none", with `retryAt` = the earliest moment any account becomes available.
 
 A per-account provider skips the router. Its account is fixed, and its only gate is that account's own `limitedUntil` / `needsLogin`.
