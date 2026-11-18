@@ -2,7 +2,7 @@
 
 An [OpenChamber](https://github.com/openchamber/openchamber) extension that lets you use several Claude subscriptions (Pro or Max) at once. It adds a failover **pool** provider, one provider per account, a panel to add and manage accounts, a usage card with a group per account, and a Work Status section with a 5h bar per enabled account.
 
-Status: 0.2.1, not yet published.
+Status: 0.2.2, not yet published.
 
 ## Requirements
 

@@ -57576,15 +57576,53 @@ async function limitFromResponse(res) {
 var MIN_LIMIT_MS = 5000;
 var BINDING_REFRESH_MS = 24 * 3600 * 1000;
 var TOUCH_EVERY_MS = 15000;
-function touch(dataDir, key, now) {
+var HEARTBEAT_MS = 1e4;
+function touch(dataDir, key, now, force = false) {
   if (!key)
     return;
   const c = readState2(dataDir).conversations[key];
-  if (!c || now - (c.activeAt ?? 0) < TOUCH_EVERY_MS)
+  if (!c || !force && now - (c.activeAt ?? 0) < TOUCH_EVERY_MS)
     return;
   try {
     updateState((s) => touchConversation(s, key, now), dataDir);
   } catch {}
+}
+function trackActivity(res, dataDir, key, heartbeatMs = HEARTBEAT_MS) {
+  if (!key || !res.body)
+    return res;
+  const reader = res.body.getReader();
+  let timer;
+  const stop = () => {
+    if (timer !== undefined) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+  const body = new ReadableStream({
+    start() {
+      timer = setInterval(() => touch(dataDir, key, Date.now(), true), heartbeatMs);
+      timer.unref?.();
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          stop();
+          touch(dataDir, key, Date.now(), true);
+          controller.close();
+        } else
+          controller.enqueue(value);
+      } catch (err) {
+        stop();
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      stop();
+      return reader.cancel(reason);
+    }
+  });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 function earliestRetryAt(enabled, state, threshold, now) {
   const all = route({ accounts: enabled, state, threshold, now });
@@ -57628,7 +57666,7 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
   const parked = sessionKey ? findBridgeByConversation(sessionKey) : undefined;
   if (parked) {
     touch(dataDir, sessionKey, Date.now());
-    return handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body);
+    return trackActivity(await handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body), dataDir, sessionKey);
   }
   const kind = req.headers.get(KIND_HEADER);
   const primary = !kind || kind === "primary";
@@ -57642,7 +57680,7 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
     const st = previous ? readState2(dataDir).accounts[previous.id] : undefined;
     if (previous && !st?.needsLogin && !((st?.limitedUntil ?? 0) > Date.now())) {
       touch(dataDir, sessionKey, Date.now());
-      return handle(withAccountDir(req, previous.configDir), body);
+      return trackActivity(await handle(withAccountDir(req, previous.configDir), body), dataDir, sessionKey);
     }
   }
   for (let attempt = 0;attempt < enabled.length; attempt++) {
@@ -57673,7 +57711,7 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
     const res = await handle(withAccountDir(req, account.configDir), body);
     const limit = await limitFromResponse(res);
     if (!limit)
-      return res;
+      return primary ? trackActivity(res, dataDir, sessionKey) : res;
     log.info("[claude-pool] account hit its limit; trying the next one", { account: account.id });
     updateState((s) => markLimited(s, account.id, limit.until), dataDir);
     tried.add(account.id);

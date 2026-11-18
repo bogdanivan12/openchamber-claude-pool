@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- A response that is still streaming keeps its account green: the proxy renews the conversation's activity every 10 s while the body is open and once more when it ends (the 5-minute window then starts). Cancelling or finishing the stream stops the heartbeat. Restart OpenChamber to load the updated plugin.
+
 ## 0.2.1
 
 - Fix: the pool state keeps fields it does not know. An older service or plugin process rewriting `state.json` used to drop the new conversation activity, so busy accounts flickered back to grey. Restart OpenChamber after updating so every process runs the same version.

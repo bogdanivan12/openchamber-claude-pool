@@ -45,11 +45,43 @@ export const BINDING_REFRESH_MS = 24 * 3600 * 1000;
 /** Activity is written at most this often per conversation, so a tool loop does not hammer state.json. */
 export const TOUCH_EVERY_MS = 15_000;
 
-function touch(dataDir: string, key: string | undefined, now: number): void {
+/** While a response is still streaming its conversation stays active: renewed this often. */
+export const HEARTBEAT_MS = 10_000;
+
+function touch(dataDir: string, key: string | undefined, now: number, force = false): void {
   if (!key) return;
   const c = readState(dataDir).conversations[key];
-  if (!c || now - (c.activeAt ?? 0) < TOUCH_EVERY_MS) return;
+  if (!c || (!force && now - (c.activeAt ?? 0) < TOUCH_EVERY_MS)) return;
   try { updateState((s) => touchConversation(s, key, now), dataDir); } catch { /* activity is only a hint */ }
+}
+
+/**
+ * Keeps the conversation active for as long as the response body is open (a long generation makes no
+ * other request), and once more when it ends. Bytes pass through untouched; a body-less response is returned as is.
+ */
+export function trackActivity(res: Response, dataDir: string, key: string | undefined, heartbeatMs: number = HEARTBEAT_MS): Response {
+  if (!key || !res.body) return res;
+  const reader = res.body.getReader();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stop = () => { if (timer !== undefined) { clearInterval(timer); timer = undefined; } };
+  const body = new ReadableStream<Uint8Array>({
+    start() {
+      timer = setInterval(() => touch(dataDir, key, Date.now(), true), heartbeatMs);
+      (timer as { unref?: () => void }).unref?.();
+    },
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) { stop(); touch(dataDir, key, Date.now(), true); controller.close(); }
+        else controller.enqueue(value);
+      } catch (err) {
+        stop();
+        controller.error(err);
+      }
+    },
+    cancel(reason) { stop(); return reader.cancel(reason); },
+  });
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
 /** The earliest moment any account is available, ignoring which ones were tried; null when none has a known time. */
@@ -116,7 +148,7 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
   const parked = sessionKey ? findBridgeByConversation(sessionKey) : undefined;
   if (parked) {
     touch(dataDir, sessionKey, Date.now());
-    return handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body);
+    return trackActivity(await handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body), dataDir, sessionKey);
   }
 
   const kind = req.headers.get(KIND_HEADER);
@@ -133,7 +165,7 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
     const st = previous ? readState(dataDir).accounts[previous.id] : undefined;
     if (previous && !st?.needsLogin && !((st?.limitedUntil ?? 0) > Date.now())) {
       touch(dataDir, sessionKey, Date.now());
-      return handle(withAccountDir(req, previous.configDir), body);
+      return trackActivity(await handle(withAccountDir(req, previous.configDir), body), dataDir, sessionKey);
     }
   }
 
@@ -165,7 +197,7 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
 
     const res = await handle(withAccountDir(req, account.configDir), body);
     const limit = await limitFromResponse(res);
-    if (!limit) return res;
+    if (!limit) return primary ? trackActivity(res, dataDir, sessionKey) : res;
 
     log.info("[claude-pool] account hit its limit; trying the next one", { account: account.id });
     updateState((s) => markLimited(s, account.id, limit.until), dataDir);
