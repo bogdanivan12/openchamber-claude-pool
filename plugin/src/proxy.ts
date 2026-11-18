@@ -74,6 +74,7 @@ import {
 } from "./session-store.js";
 import { log } from "./log.js";
 import { installPoolStateBridge } from "./pool-state-bridge.js";
+import { installTranscriptMigration } from "./migrate.js";
 import { checkSubscriptionAuth } from "./detect.js";
 import { handlePoolChat } from "./pool-proxy.js";
 import {
@@ -325,6 +326,7 @@ async function isProxyHealthyAt(baseUrl: string): Promise<boolean> {
 export async function startProxy(): Promise<number> {
   if (server && proxyPort) return proxyPort;
   installPoolStateBridge();
+  installTranscriptMigration();
 
   // Only reuse a sibling listener when the operator pinned a port.
   if (REQUESTED_PROXY_PORT > 0) {

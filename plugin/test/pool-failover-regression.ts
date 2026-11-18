@@ -6,7 +6,7 @@
  * Run: bun plugin/test/pool-failover-regression.ts
  */
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { mockHandle, startMockedProxy, textDelta } from "./helpers.ts";
@@ -73,14 +73,36 @@ try {
   assert.equal(seenDirs.at(-1), B_DIR);
 
   // 4. limit before output: rerun on the next account inside the proxy
+  // the real migration hook (installed by startProxy) must carry the transcript
+  const { setForeignSessionId, clearForeignSessionId } = await import("../src/session-store.ts");
+  const SID = "99999999-0000-0000-0000-000000000000";
+  mkdirSync(join(B_DIR, "projects", "p"), { recursive: true });
+  writeFileSync(join(B_DIR, "projects", "p", `${SID}.jsonl`), '{"uuid":"leaf"}\n');
+  // Start from a clean binding: the boundaries recorded by cases 2-3 would not
+  // match this request's history and would drop the session as diverged.
+  clearForeignSessionId("s-pool");
+  setForeignSessionId("s-pool", SID, { cwd: home });
   limitedDirs.add(B_DIR);
   seenDirs.length = 0;
-  res = await send("pool", "s-pool");
+  // A follow-up turn: the history before the prompt is what the session already holds.
+  res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-opencode-claude-session": "s-pool", "x-claude-pool-account": "pool" },
+    body: JSON.stringify({
+      model: "sonnet", stream: false,
+      messages: [
+        { role: "user", content: "hi s-pool" },
+        { role: "assistant", content: "ok" },
+        { role: "user", content: "and again" },
+      ],
+    }),
+  });
   assert.equal(res.status, 200, "rerun answered 200");
   await res.text();
   assert.deepEqual(seenDirs, [B_DIR, C_DIR]);
   assert.ok((readState(home).accounts.bbbbbb.limitedUntil ?? 0) > Date.now());
   assert.equal(readState(home).conversations["s-pool"].accountId, "cccccc");
+  assert.ok(existsSync(join(C_DIR, "projects", "p", `${SID}.jsonl`)), "transcript followed the conversation");
 
   // 5. everything limited: 429 with the earliest reset, no endless loop
   limitedDirs.add(C_DIR); limitedDirs.add(undefined);
@@ -107,6 +129,7 @@ try {
 
   // 8. G1: a parked bridge keeps its own account even when that account is over threshold
   const { handlePoolChat, setMigrationHook } = await import("../src/pool-proxy.ts");
+  const { installTranscriptMigration } = await import("../src/migrate.ts");
   const { putBridge, deleteBridge } = await import("../src/bridge-pool.ts");
   const calls: Array<string | null> = [];
   const fake = async (r: Request) => { calls.push(r.headers.get("x-opencode-claude-config-dir")); return new Response("ok"); };
@@ -157,6 +180,7 @@ try {
   assert.deepEqual(hooks, [["s-title", B_DIR, C_DIR]]);
   assert.equal(readState(home).conversations["s-title"].accountId, "cccccc");
   setMigrationHook(null);
+  installTranscriptMigration(); // restore the real hook for any later case
 
   // 11. retryAt covers the accounts that were just tried
   const { setNeedsLogin } = await import("../../shared/state.ts");
