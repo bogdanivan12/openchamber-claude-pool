@@ -28,6 +28,7 @@ import {
   type ParkedToolCall,
 } from "./bridge-pool.js";
 import { buildClaudeCodeChildEnv, MCP_DESCRIPTION_LIMIT } from "./auth-env.js";
+import { isPoolMode } from "./config-dir.js";
 import {
   classifyClaudeFailure,
   failureCodeFor,
@@ -1125,6 +1126,7 @@ async function startNewTurn(input: {
   const env = buildClaudeCodeChildEnv();
   const configDir = requestConfigDir(req);
   if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
+  else if (isPoolMode()) delete env.CLAUDE_CONFIG_DIR;
 
   const requestTools = Array.isArray(body.tools) ? body.tools : [];
   // A resumed summary repeats the tools of the chat turn it continues.

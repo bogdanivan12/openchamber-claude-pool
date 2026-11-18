@@ -1,6 +1,7 @@
 /**
  * Claude CLI detection + Agent SDK probe (from OpenChamber harness).
  */
+import { isPoolMode } from "./config-dir.js";
 import { buildClaudeCodeChildEnv } from "./auth-env.js";
 import { resolveClaudeCli, runCliProbe } from "./executable-path.js";
 import { probeClaudeAgentSdk } from "./query.js";
@@ -118,12 +119,21 @@ const subscriptionChecks = new Map<string, { at: number; result: Promise<string 
 type AuthStatus = { loggedIn: boolean; detail: string } | null;
 type AuthStatusProbe = (configDir?: string) => AuthStatus | Promise<AuthStatus>;
 
+function withoutConfigDir(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const { CLAUDE_CONFIG_DIR: _ignored, ...rest } = env;
+  return rest;
+}
+
 const defaultAuthStatusProbe: AuthStatusProbe = async (configDir) => {
   const binaryPath = await resolveClaudeCli(process.env);
   if (!binaryPath) return null;
   return probeClaudeAuthStatusCli({
     binaryPath,
-    env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : undefined,
+    env: configDir
+      ? { ...process.env, CLAUDE_CONFIG_DIR: configDir }
+      : isPoolMode()
+        ? withoutConfigDir(process.env)
+        : undefined,
   });
 };
 let authStatusProbe = defaultAuthStatusProbe;

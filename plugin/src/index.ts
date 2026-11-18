@@ -20,6 +20,7 @@ import {
   KIND_HEADER,
   OPENAI_COMPATIBLE_PACKAGE,
 } from "./constants.js";
+import { setPoolMode } from "./config-dir.js";
 import { detectClaudeCode } from "./detect.js";
 import { accountFromProviderId, poolProviderSpecs, providerForSession, rememberSessionProvider, watchAccounts, type PoolProviderSpec } from "./pool.js";
 import { log } from "./log.js";
@@ -198,6 +199,7 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
     if ((ctx.options as { debug?: unknown } | undefined)?.debug === true) {
       process.env.OPENCODE_CLAUDE_DEBUG ??= "1";
     }
+    setPoolMode(true);
     const directory = ctx.location.directory;
     // Bind first (ephemeral port by default) so the provider points at the
     // live listener for this process.
