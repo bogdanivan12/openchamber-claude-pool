@@ -86,12 +86,10 @@ Data dir: `~/.claude-pool/` on macOS and `%USERPROFILE%\.claude-pool\` on Window
         "seven_day": { "usedPercent": 71, "resetsAt": 1763900000000, "updatedAt": 1763480000000 }
       },
       "limitedUntil": null,
-      "needsLogin": false,
-      "updatedAt": 1763480000000,
-      "source": "rate_limit_event"
+      "needsLogin": false
     }
   },
-  "conversations": { "<conversationKey>": "a1b2c3" }
+  "conversations": { "<conversationKey>": { "accountId": "a1b2c3", "at": 1763480000000 } }
 }
 ```
 
