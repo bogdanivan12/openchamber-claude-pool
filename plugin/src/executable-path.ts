@@ -8,7 +8,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readdir as fsReaddir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { buildClaudeCodeChildEnv } from "./auth-env.js";
@@ -141,14 +141,46 @@ async function usableClaudePath(
   return (await probeClaudePath(candidate, env)) ? candidate : null;
 }
 
+export type KnownLocationDeps = {
+  platform?: NodeJS.Platform;
+  /** Directory listing (no shell); rejects when the directory is absent. */
+  readdir?: (dir: string) => Promise<string[]>;
+  /** `npm prefix -g`, or "" when npm is unavailable. */
+  npmPrefix?: () => Promise<string>;
+};
+
+async function defaultNpmPrefix(): Promise<string> {
+  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
+  return prefix.failed ? "" : prefix.stdout.trim();
+}
+
+/** `<root>/<version>/<suffix...>/claude` for every version dir, newest (string-sorted) first. */
+async function versionedCandidates(
+  root: string,
+  suffix: string[],
+  readdir: (dir: string) => Promise<string[]>,
+): Promise<string[]> {
+  try {
+    const versions = (await readdir(root)).sort().reverse();
+    return versions.map((version) => join(root, version, ...suffix, "claude"));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Install locations the managed OpenChamber server commonly misses because its
- * PATH is not a login shell's PATH: the official installer's `~/.local/bin`
- * and the npm global bin.
+ * PATH is not a login shell's PATH (the desktop app's is minimal): the
+ * official installer's `~/.local/bin`, the npm global bin, then the usual
+ * package-manager spots. Each candidate is verified before use.
  */
-async function knownClaudeLocations(env: ProbeEnv): Promise<string[]> {
+export async function knownClaudeLocations(
+  env: ProbeEnv,
+  deps: KnownLocationDeps = {},
+): Promise<string[]> {
+  const platform = deps.platform ?? process.platform;
   const home = typeof env.HOME === "string" && env.HOME ? env.HOME : homedir();
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     // npm's global bin is the prefix root on Windows, not `<prefix>\bin`, and
     // `npm` itself is a .cmd that cannot be spawned without a shell.
     const appData =
@@ -161,11 +193,21 @@ async function knownClaudeLocations(env: ProbeEnv): Promise<string[]> {
       join(appData, "npm", "claude.cmd"),
     ];
   }
+  const readdir = deps.readdir ?? ((dir: string) => fsReaddir(dir));
   const candidates = [join(home, ".local", "bin", "claude")];
 
-  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
-  const dir = prefix.failed ? "" : prefix.stdout.trim();
+  const dir = await (deps.npmPrefix ?? defaultNpmPrefix)();
   if (dir) candidates.push(join(dir, "bin", "claude"));
+  candidates.push(
+    join("/opt/homebrew", "bin", "claude"),
+    join("/usr/local", "bin", "claude"),
+    join(home, ".claude", "local", "claude"),
+    join(home, ".bun", "bin", "claude"),
+    join(home, ".npm-global", "bin", "claude"),
+    join(home, ".volta", "bin", "claude"),
+    ...(await versionedCandidates(join(home, ".nvm", "versions", "node"), ["bin"], readdir)),
+    ...(await versionedCandidates(join(home, ".local", "share", "fnm", "node-versions"), ["installation", "bin"], readdir)),
+  );
   return candidates;
 }
 
