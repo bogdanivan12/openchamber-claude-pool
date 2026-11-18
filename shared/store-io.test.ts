@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readJsonFile, withLock, writeJsonAtomic } from "./store-io.ts";
@@ -40,6 +40,33 @@ describe("store-io", () => {
     const past = new Date(Date.now() - 60_000);
     utimesSync(lock, past, past);
     expect(withLock(lock, () => "ok", { staleMs: 10_000, timeoutMs: 500 })).toBe("ok");
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("no *.stale.* files remain after a takeover", () => {
+    const dir = tmp();
+    const lock = join(dir, "state.lock");
+    writeFileSync(lock, "old");
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(lock, past, past);
+    withLock(lock, () => 1, { staleMs: 10_000, timeoutMs: 500 });
+    expect(readdirSync(dir).filter((n) => n.includes(".stale."))).toEqual([]);
+  });
+
+  it("the lock file holds a non-empty token while fn runs", () => {
+    const lock = join(tmp(), "state.lock");
+    let seen = "";
+    withLock(lock, () => { seen = readFileSync(lock, "utf8"); });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("release does not delete a lock taken over by someone else", () => {
+    const lock = join(tmp(), "state.lock");
+    withLock(lock, () => { writeFileSync(lock, "someone-else"); });
+    expect(existsSync(lock)).toBe(true);
+    expect(readFileSync(lock, "utf8")).toBe("someone-else");
+    unlinkSync(lock);
   });
 
   it("a fresh foreign lock times out", () => {

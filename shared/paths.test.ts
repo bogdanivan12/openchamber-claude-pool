@@ -49,5 +49,6 @@ describe("paths", () => {
     expect(isInsidePoolAccounts(join(d, "accounts", "abc123"), d)).toBe(true);
     expect(isInsidePoolAccounts(join(HOME, ".claude-b"), d)).toBe(false);
     expect(isInsidePoolAccounts(join(d, "accounts"), d)).toBe(false);
+    expect(isInsidePoolAccounts(join(d, "accounts", "..x"), d)).toBe(true);
   });
 });

@@ -37,5 +37,5 @@ export function keychainService(configDir: string, home: string = homedir()): st
 /** True only for `<dataDir>/accounts/<one segment>`: dirs the pool created and may delete. */
 export function isInsidePoolAccounts(dir: string, dataDir: string = poolDataDir()): boolean {
   const rel = relative(join(dataDir, "accounts"), normalizeDir(dir));
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && !rel.includes(sep);
+  return rel !== "" && !(rel === ".." || rel.startsWith(".." + sep)) && !isAbsolute(rel) && !rel.includes(sep);
 }

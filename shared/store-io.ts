@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 
@@ -38,6 +38,13 @@ export function writeJsonAtomic(path: string, value: unknown): void {
   }
 }
 
+/**
+ * Cross-process lock via an exclusive-create file. `fn` must finish well within
+ * `staleMs` (callers only do small JSON writes): past that, another process may
+ * legitimately take the lock over. Each lock file holds a unique token and is
+ * released only if it still holds ours, so a late release never deletes a lock
+ * that someone else has taken over.
+ */
 export function withLock<T>(
   lockPath: string,
   fn: () => T,
@@ -45,22 +52,37 @@ export function withLock<T>(
 ): T {
   const staleMs = opts.staleMs ?? 10_000;
   const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
+  const token = `${process.pid}:${randomBytes(8).toString("hex")}`;
   mkdirSync(dirname(lockPath), { recursive: true });
   for (;;) {
     try {
       const fd = openSync(lockPath, "wx");
-      writeSync(fd, `${process.pid} ${Date.now()}`);
+      try {
+        writeSync(fd, token);
+      } catch (err) {
+        try { closeSync(fd); } catch {}
+        try { unlinkSync(lockPath); } catch {}
+        throw err;
+      }
       closeSync(fd);
       break;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       try {
         if (Date.now() - statSync(lockPath).mtimeMs > staleMs) {
-          unlinkSync(lockPath);
+          // Only one racer can win this rename; the others get ENOENT and loop.
+          const aside = `${lockPath}.stale.${randomBytes(6).toString("hex")}`;
+          renameSync(lockPath, aside);
+          if (Date.now() - statSync(aside).mtimeMs <= staleMs) {
+            // We grabbed a live lock created in the gap: put it back if we can.
+            try { if (!existsSync(lockPath)) renameSync(aside, lockPath); } catch {}
+          }
+          try { unlinkSync(aside); } catch {}
           continue;
         }
-      } catch {
-        continue; // vanished between checks
+      } catch (inner) {
+        if ((inner as NodeJS.ErrnoException).code === "ENOENT") continue; // vanished between checks
+        // Any other error: do not spin; fall through to the deadline check and sleep.
       }
       if (Date.now() > deadline) throw new Error(`could not take the Claude Pool lock at ${lockPath}`);
       sleepSync(20);
@@ -69,6 +91,8 @@ export function withLock<T>(
   try {
     return fn();
   } finally {
-    try { unlinkSync(lockPath); } catch {}
+    try {
+      if (readFileSync(lockPath, "utf8") === token) unlinkSync(lockPath);
+    } catch {}
   }
 }
