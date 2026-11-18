@@ -80,7 +80,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     await click(root, "Start");
     expect(svc.find("POST", "/api/login/start")[0].body).toEqual({ label: "work" });
     expect(h.opened).toEqual(["https://claude.test/oauth/authorize"]);
-    expect(text(root)).toContain("A wrong code starts the sign-in over.");
+    expect(text(root)).toContain("A wrong code cancels this sign-in; you would need to start again.");
     await typeInto(root, "Code", "bad");
     await click(root, "Finish sign-in");
     expect(text(root)).toContain("Sign-in failed");
@@ -176,7 +176,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     svc.accounts[0].state = { windows: {}, limitedUntil: null, needsLogin: true };
     await open();
     expect(text(root)).toContain('Sign in again as "work"');
-    expect(text(root)).not.toContain("A wrong code starts the sign-in over.");
+    expect(text(root)).not.toContain("A wrong code cancels this sign-in; you would need to start again.");
     svc.accounts[0].state = null;
     const orig = svc.serviceRequest.bind(svc);
     svc.serviceRequest = async (r) => {

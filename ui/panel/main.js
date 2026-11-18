@@ -2864,7 +2864,7 @@ function renderLoginScreen(ctx, page) {
   box.append(el2("strong", "", s.isNew ? `Sign in "${s.view.label}"` : `Sign in again as "${s.view.label}"`));
   box.append(el2("div", "", "Sign in on the Claude page that opened, then paste the code it shows."));
   if (s.isNew)
-    box.append(el2("div", "muted", "A wrong code starts the sign-in over."));
+    box.append(el2("div", "muted", "A wrong code cancels this sign-in; you would need to start again."));
   const link = el2("div", "row");
   mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void openSignInPage(ctx, s.view.url).then(() => ctx.render()) });
   box.append(link);

@@ -117,7 +117,7 @@ export function renderLoginScreen(ctx: Ctx, page: HTMLElement): void {
   const box = el("div", "acct");
   box.append(el("strong", "", s.isNew ? `Sign in "${s.view.label}"` : `Sign in again as "${s.view.label}"`));
   box.append(el("div", "", "Sign in on the Claude page that opened, then paste the code it shows."));
-  if (s.isNew) box.append(el("div", "muted", "A wrong code starts the sign-in over."));
+  if (s.isNew) box.append(el("div", "muted", "A wrong code cancels this sign-in; you would need to start again."));
   const link = el("div", "row");
   mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void openSignInPage(ctx, s.view.url).then(() => ctx.render()) });
   box.append(link);
