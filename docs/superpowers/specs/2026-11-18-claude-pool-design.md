@@ -199,7 +199,7 @@ Work Status section: one line per account with its 5h bar, and the pool's curren
 | Situation | Behavior |
 |---|---|
 | Account login expired or revoked | `needsLogin`, out of the pool; card and panel show "Sign in again"; pool continues |
-| `claude` missing | providers stay registered; a turn fails with the plugin's existing install message, and the panel shows a \"Claude Code CLI not found\" banner with the install command |
+| `claude` missing | providers stay registered; a turn fails with the plugin's existing install message, and the panel shows a "Claude Code CLI not found" banner with the install command |
 | Keychain access denied (macOS) | only that account's usage shows the error; turns still run (the CLI reads its own Keychain item) |
 | Corrupt `state.json` / `accounts.json` | see section 4 |
 | Only one account | pool behaves like a single provider, no failover |
