@@ -300,31 +300,39 @@ describe("account api", () => {
     expect(readAccounts(dataDir).accounts[0]).toMatchObject({ label: "a", enabled: true });
   });
 
-  it("does not turn a storage failure into a 400", async () => {
+  const cannotBlockWrites = process.platform === "win32" || process.getuid?.() === 0;
+
+  it.skipIf(cannotBlockWrites)("surfaces a storage failure as a server error, not a 400", async () => {
     const { dataDir, call } = setup();
     updateAccounts((f) => { f.accounts.push({ id: "aaaaaa", label: "a", configDir: "/x/a", order: 0, enabled: true }); }, dataDir);
     chmodSync(dataDir, 0o500);
     try {
-      await expect(Promise.resolve().then(() => call("PATCH /api/accounts/:id", { label: "b" }, "id=aaaaaa"))).rejects.toThrow();
+      // The route rethrows; http.ts maps a thrown error to 500. A 400 would come back as a resolved response.
+      const outcome = await Promise.resolve().then(() => call("PATCH /api/accounts/:id", { label: "b" }, "id=aaaaaa")).then(
+        (res) => ({ resolved: res }),
+        (err) => ({ thrown: err as Error }),
+      );
+      expect(outcome).not.toHaveProperty("resolved");
+      const thrown = (outcome as { thrown: Error }).thrown;
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown.message).not.toMatch(/already uses this name/);
+      expect(thrown.message).toMatch(/EACCES|EPERM|permission|denied/i);
     } finally {
       chmodSync(dataDir, 0o700);
     }
+    expect(readAccounts(dataDir).accounts[0].label).toBe("a");
   });
 
   it("removes the account and warns (200) when deleting the login dir fails", async () => {
-    const { dataDir, call } = setup();
+    const removed: string[] = [];
+    const { dataDir, call } = setup({ rm: (path) => { removed.push(path); throw new Error("EBUSY: resource busy"); } });
     const created = join(dataDir, "accounts", "abcdef");
     mkdirSync(created, { recursive: true });
     updateAccounts((f) => { f.accounts.push({ id: "abcdef", label: "new", configDir: created, order: 0, enabled: true }); }, dataDir);
-    chmodSync(join(dataDir, "accounts"), 0o500);
-    try {
-      const out = await call("DELETE /api/accounts/:id", undefined, "id=abcdef&deleteLogin=1");
-      expect(out.status).toBe(200);
-      expect(out.body).toMatchObject({ ok: true, deletedLogin: false });
-      expect(typeof out.body.warning).toBe("string");
-    } finally {
-      chmodSync(join(dataDir, "accounts"), 0o700);
-    }
+    const out = await call("DELETE /api/accounts/:id", undefined, "id=abcdef&deleteLogin=1");
+    expect(out.status).toBe(200);
+    expect(out.body).toEqual({ ok: true, deletedLogin: false, warning: "EBUSY: resource busy" });
+    expect(removed).toEqual([created]);
     expect(readAccounts(dataDir).accounts).toEqual([]);
     expect(existsSync(created)).toBe(true);
   });

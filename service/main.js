@@ -6585,6 +6585,7 @@ function accountRoutes(deps = {}) {
   const authStatus = deps.authStatus ?? readAuthStatus;
   const hasCredential = deps.hasCredential ?? (async (dir) => await readCredential(dir) !== null);
   const logout = deps.logout ?? logoutDir;
+  const rm = deps.rm ?? ((path) => rmSync(path, { recursive: true, force: true }));
   return {
     "GET /api/accounts": async () => {
       const found = await cliFound();
@@ -6729,7 +6730,7 @@ function accountRoutes(deps = {}) {
           await logout(removed.configDir);
         } catch {}
         try {
-          rmSync(removed.configDir, { recursive: true, force: true });
+          rm(removed.configDir);
           return { status: 200, body: { ok: true, deletedLogin: true } };
         } catch (err) {
           return { status: 200, body: { ok: true, deletedLogin: false, warning: err instanceof Error ? err.message : "could not delete the login folder" } };

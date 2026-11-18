@@ -43,6 +43,7 @@ export function accountRoutes(deps: {
   hasCredential?: (dir: string) => Promise<boolean>;
   cliFound?: () => Promise<boolean>;
   logout?: (dir: string) => Promise<void>;
+  rm?: (path: string) => void;
 } = {}): Record<string, Route> {
   const cliFound = deps.cliFound ?? (async () => (await resolveClaudeCli(process.env)) !== null);
   const dataDir = deps.dataDir ?? poolDataDir();
@@ -50,6 +51,7 @@ export function accountRoutes(deps: {
   const authStatus = deps.authStatus ?? readAuthStatus;
   const hasCredential = deps.hasCredential ?? (async (dir: string) => (await readCredential(dir)) !== null);
   const logout = deps.logout ?? logoutDir;
+  const rm = deps.rm ?? ((path: string) => rmSync(path, { recursive: true, force: true }));
 
   return {
     "GET /api/accounts": async () => {
@@ -180,7 +182,7 @@ export function accountRoutes(deps: {
         // Removes the Keychain item the dir leaves behind; best effort, never blocks the delete.
         try { await logout(removed.configDir); } catch {}
         try {
-          rmSync(removed.configDir, { recursive: true, force: true });
+          rm(removed.configDir);
           return { status: 200, body: { ok: true, deletedLogin: true } };
         } catch (err) {
           // The account is already gone from the pool; report the leftover folder instead of failing.
