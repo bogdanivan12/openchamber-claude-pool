@@ -75,6 +75,7 @@ import {
 import { log } from "./log.js";
 import { installPoolStateBridge } from "./pool-state-bridge.js";
 import { checkSubscriptionAuth } from "./detect.js";
+import { handlePoolChat } from "./pool-proxy.js";
 import {
   getRateLimitSnapshot,
   isClaudeRateLimitText,
@@ -501,7 +502,7 @@ async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
     try {
       const body = (await req.json()) as ChatCompletionRequest;
-      return await handleChatCompletions(req, body);
+      return await handlePoolChat(req, body, handleChatCompletions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error("[opencode-claude] chat completions error", message);
