@@ -69,4 +69,17 @@ describe("usage", () => {
     const r = await readAccountUsage({ ...account, id: "123456" }, { readCredential: async () => { throw new Error("boom"); } });
     expect(r).toMatchObject({ ok: false, plan: null });
   });
+
+  it("a credential read error is an error result without needsLogin", async () => {
+    const r = await readAccountUsage({ ...account, id: "654321" }, { readCredentialDetailed: async () => ({ cred: null, reason: "error", message: "Keychain access failed (exit 51)" }) });
+    expect(r.ok).toBe(false);
+    expect((r as any).needsLogin).toBeUndefined();
+    expect((r as any).error).toContain("could not read this account's login (Keychain access failed (exit 51))");
+    expect((r as any).error).toContain("allow it; reload to retry");
+  });
+
+  it("a not-found credential is still needsLogin", async () => {
+    const r = await readAccountUsage({ ...account, id: "654322" }, { readCredentialDetailed: async () => ({ cred: null, reason: "not-found" }) });
+    expect(r).toMatchObject({ ok: false, needsLogin: true });
+  });
 });

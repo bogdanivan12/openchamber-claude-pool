@@ -1,6 +1,6 @@
 import type { Account } from "../../shared/accounts.ts";
 import { enabledAccounts, readAccounts } from "../../shared/accounts.ts";
-import { readCredential as defaultReadCredential } from "../../shared/creds.ts";
+import { readCredentialDetailed as defaultReadDetailed, type CredentialRead } from "../../shared/creds.ts";
 import { poolDataDir } from "../../shared/paths.ts";
 import { recordWindow, setNeedsLogin, updateState } from "../../shared/state.ts";
 
@@ -14,7 +14,13 @@ export type UsageRead =
   | { ok: true; windows: Partial<Record<"five_hour" | "seven_day", Win>>; plan: string | null }
   | { ok: false; error: string; needsLogin?: boolean; plan: string | null };
 
-export type UsageDeps = { fetch?: typeof fetch; readCredential?: typeof defaultReadCredential; now?: () => number };
+export type UsageDeps = {
+  fetch?: typeof fetch;
+  readCredentialDetailed?: (configDir: string) => Promise<CredentialRead>;
+  /** Simple form (null = not found); used by tests and callers that do not classify errors. */
+  readCredential?: (configDir: string) => Promise<CredentialRead["cred"]>;
+  now?: () => number;
+};
 
 const cooldownUntil = new Map<string, number>();
 
@@ -46,11 +52,19 @@ export function parseUsagePayload(payload: unknown): UsageRead & { ok: true } {
 export async function readAccountUsage(account: Account, deps: UsageDeps = {}): Promise<UsageRead> {
   const now = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
-  let cred: Awaited<ReturnType<typeof defaultReadCredential>>;
+  let read: CredentialRead;
   try {
-    cred = await (deps.readCredential ?? defaultReadCredential)(account.configDir);
+    read = deps.readCredentialDetailed
+      ? await deps.readCredentialDetailed(account.configDir)
+      : deps.readCredential
+        ? await deps.readCredential(account.configDir).then((cred): CredentialRead => (cred ? { cred } : { cred: null, reason: "not-found" }))
+        : await defaultReadDetailed(account.configDir);
   } catch (err) {
     return { ok: false, plan: null, error: `${account.label}: could not read the login (${err instanceof Error ? err.message.slice(0, 200) : "unknown error"})` };
+  }
+  const cred = read.cred;
+  if (!cred && read.reason === "error") {
+    return { ok: false, plan: null, error: `${account.label}: could not read this account's login (${read.message ?? "unknown error"}). If macOS asked for Keychain access, allow it; reload to retry.` };
   }
   if (!cred) return { ok: false, needsLogin: true, plan: null, error: `No Claude login found (or the Keychain denied access) for ${account.label}. Sign in again in the Claude Pool panel.` };
   const plan = cred.subscriptionType;

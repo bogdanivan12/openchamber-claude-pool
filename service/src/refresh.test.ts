@@ -53,6 +53,23 @@ describe("refreshAllUsage", () => {
     expect(s.accounts.bbbbbb.needsLogin).toBe(true);
   });
 
+  it("a credential read error leaves needsLogin and the windows alone; not-found sets needsLogin", async () => {
+    await refreshAllUsage(dir, { readCredential, fetch: fetchBy({ a: "ok", b: "ok" }), now: () => 1000 });
+    const errored = async () => ({ cred: null, reason: "error" as const, message: "Keychain access failed (exit 51)" });
+    const out = await refreshAllUsage(dir, { readCredentialDetailed: errored, fetch: fetchBy({ a: "ok", b: "ok" }), now: () => 2000 });
+    expect(out.aaaaaa).toMatchObject({ ok: false });
+    expect((out.aaaaaa as any).needsLogin).toBeUndefined();
+    let s = readState(dir);
+    expect(s.accounts.aaaaaa.needsLogin).toBe(false);
+    expect(s.accounts.bbbbbb.needsLogin).toBe(false);
+    expect(s.accounts.aaaaaa.windows.five_hour?.usedPercent).toBe(40);
+    const missing = async () => ({ cred: null, reason: "not-found" as const });
+    await refreshAllUsage(dir, { readCredentialDetailed: missing, fetch: fetchBy({ a: "ok", b: "ok" }), now: () => 3000 });
+    s = readState(dir);
+    expect(s.accounts.aaaaaa.needsLogin).toBe(true);
+    expect(s.accounts.aaaaaa.windows.five_hour?.usedPercent).toBe(40);
+  });
+
   it("does not write state for an account removed while the reads were in flight", async () => {
     const slow = (async () => {
       updateAccounts((f) => { f.accounts = f.accounts.filter((a) => a.id !== "bbbbbb"); }, dir);

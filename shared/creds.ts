@@ -28,28 +28,43 @@ export function parseCredentialBlob(raw: string): ClaudeCredential | null {
   }
 }
 
-/** Read-only. Never logs the token. Keychain first on macOS (the file there is a stale leftover). */
-export async function readCredential(
-  configDir: string,
-  deps: { platform?: NodeJS.Platform; home?: string; exec?: ExecFn; readFile?: (path: string) => string } = {},
-): Promise<ClaudeCredential | null> {
+export type CredentialRead = { cred: ClaudeCredential | null; reason?: "not-found" | "error"; message?: string };
+type CredentialDeps = { platform?: NodeJS.Platform; home?: string; exec?: ExecFn; readFile?: (path: string) => string };
+
+const errCode = (err: unknown): unknown => (err as { code?: unknown } | null)?.code;
+
+/**
+ * Read-only. Never logs the token. Keychain first on macOS (the file there is a stale leftover).
+ * `reason` is "not-found" only when every source said the login does not exist; any other failure
+ * (denied prompt, timeout, unreadable file) is "error" so callers do not mistake it for a signed-out account.
+ */
+export async function readCredentialDetailed(configDir: string, deps: CredentialDeps = {}): Promise<CredentialRead> {
   const platform = deps.platform ?? process.platform;
   const home = deps.home ?? homedir();
   const exec = deps.exec ?? defaultExec;
   const readFile = deps.readFile ?? ((p: string) => readFileSync(p, "utf8"));
   const dir = platform === "win32" ? configDir : normalizeDir(configDir, home);
+  let message: string | undefined;
 
   if (platform === "darwin") {
     try {
       const cred = parseCredentialBlob(await exec("security", ["find-generic-password", "-s", keychainService(dir, home), "-w"]));
-      if (cred) return cred;
-    } catch {
-      // no item, or access denied: try the file
+      if (cred) return { cred };
+    } catch (err) {
+      const code = errCode(err);
+      if (code !== 44) message = `Keychain access failed (exit ${code ?? "unknown"})`;
     }
   }
   try {
-    return parseCredentialBlob(readFile(join(dir, ".credentials.json")));
-  } catch {
-    return null;
+    const cred = parseCredentialBlob(readFile(join(dir, ".credentials.json")));
+    if (cred) return { cred };
+  } catch (err) {
+    const code = errCode(err);
+    if (code !== "ENOENT") message ??= `credentials file unreadable (${typeof code === "string" ? code : "I/O error"})`;
   }
+  return message === undefined ? { cred: null, reason: "not-found" } : { cred: null, reason: "error", message };
+}
+
+export async function readCredential(configDir: string, deps: CredentialDeps = {}): Promise<ClaudeCredential | null> {
+  return (await readCredentialDetailed(configDir, deps)).cred;
 }
