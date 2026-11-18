@@ -239,7 +239,7 @@ describe("account api", () => {
     }, dataDir);
     const out: any = await call("GET /api/accounts");
     expect(out.body.accounts[0]).toMatchObject({ id: a.id, poolActive: true, nextChat: false });
-    expect(out.body.accounts[1]).toMatchObject({ id: b.id, poolActive: false, nextChat: true });
+    expect(out.body.accounts[1]).toMatchObject({ id: b.id, poolActive: false, nextChat: true, available: true });
   });
 
   it("lists accounts with their state, the picked account and the backup flag", async () => {

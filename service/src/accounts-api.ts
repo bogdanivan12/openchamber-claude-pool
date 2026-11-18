@@ -4,7 +4,7 @@ import { resolveClaudeCli } from "../../plugin/src/executable-path.ts";
 import { MAX_THRESHOLD, MIN_THRESHOLD, enabledAccounts, newAccountId, readAccounts, updateAccounts, type Account } from "../../shared/accounts.ts";
 import { readCredential } from "../../shared/creds.ts";
 import { accountsFile, isInsidePoolAccounts, normalizeDir, poolDataDir, sameDir } from "../../shared/paths.ts";
-import { route } from "../../shared/router.ts";
+import { isAvailable, route } from "../../shared/router.ts";
 import { readState } from "../../shared/state.ts";
 import { logoutDir, readAuthStatus } from "./auth-status.ts";
 import type { Route } from "./http.ts";
@@ -88,6 +88,7 @@ export function accountRoutes(deps: {
             state: state.accounts[a.id] ?? null,
             poolActive: a.id === active,
             nextChat: a.id === nextChat && a.id !== active,
+            available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir),
           })),
         },

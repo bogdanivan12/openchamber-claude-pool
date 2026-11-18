@@ -2055,6 +2055,14 @@ function windowPercent(st, name, now) {
     return 0;
   return w.usedPercent;
 }
+function accountKind(v, now) {
+  const unavailable = v.state?.needsLogin || v.state?.limitedUntil != null && v.state.limitedUntil > now || v.available === false;
+  if (unavailable)
+    return { kind: "out", label: "Unavailable" };
+  if (v.poolActive)
+    return { kind: "use", label: "In use now" };
+  return { kind: "ready", label: "Available" };
+}
 
 // ui/status/app.ts
 var el2 = (tag, cls = "", text = "") => {
@@ -2087,14 +2095,23 @@ function windowLine(label, a, name, now) {
   return l;
 }
 function row(a, now, out) {
-  const name = el2("span", `name${a.poolActive ? " active" : ""}`, (a.poolActive ? "● " : "") + a.label);
+  const k = accountKind(a, now);
+  const dot = el2("span", `dot ${k.kind}`);
+  dot.title = k.label;
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", k.label);
+  const name = el2("span", `name${a.poolActive ? " active" : ""}`, a.label);
   const badge = statusBadge(a, now);
   const head = el2("div", "head");
-  head.append(name);
+  const who = el2("span", "who");
+  who.append(dot, name);
+  head.append(who);
   if (badge.tone === "error")
     head.append(el2("span", "note error", badge.label.toLowerCase()));
   else if (badge.tone === "warning")
     head.append(el2("span", "note warning", badge.label.toLowerCase()));
+  else if (k.kind === "out")
+    head.append(el2("span", "note warning", "limit reached"));
   else if (a.nextChat)
     head.append(el2("span", "note muted", "next for new chats"));
   const r = el2("div", "row");

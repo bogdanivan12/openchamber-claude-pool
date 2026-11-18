@@ -6663,6 +6663,7 @@ function accountRoutes(deps = {}) {
             state: state.accounts[a.id] ?? null,
             poolActive: a.id === active,
             nextChat: a.id === nextChat && a.id !== active,
+            available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir)
           }))
         }

@@ -9,6 +9,11 @@
       .list { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-right: 1.4em; }
       .row { display: flex; flex-direction: column; gap: 4px; }
       .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
+      .who { display: flex; align-items: center; gap: .5em; min-width: 0; }
+      .dot { flex: none; width: .55em; height: .55em; border-radius: 50%; }
+      .dot.use { background: var(--status-success, #3a7); }
+      .dot.ready { background: transparent; box-shadow: inset 0 0 0 1.5px var(--surface-muted-foreground, #888); }
+      .dot.out { background: var(--status-error, #d33); }
       .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .active { font-weight: 600; }
       .note { flex: none; opacity: .8; }

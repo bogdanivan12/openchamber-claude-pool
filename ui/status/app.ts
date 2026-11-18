@@ -1,7 +1,7 @@
 import type { HostReadyContext } from "@openchamber/sdk";
 import { applyHostReady } from "@openchamber/sdk/ui";
 import { api, type Host } from "../shared/api.ts";
-import { statusBadge, windowPercent, type AccountView } from "../shared/format.ts";
+import { accountKind, statusBadge, windowPercent, type AccountView } from "../shared/format.ts";
 
 /** The part of the SDK host the section uses. */
 export type StatusHost = Host & {
@@ -40,12 +40,20 @@ function windowLine(label: string, a: AccountView, name: "five_hour" | "seven_da
 }
 
 function row(a: AccountView, now: number, out: Element[]): void {
-  const name = el("span", `name${a.poolActive ? " active" : ""}`, (a.poolActive ? "● " : "") + a.label);
+  const k = accountKind(a, now);
+  const dot = el("span", `dot ${k.kind}`);
+  dot.title = k.label;
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", k.label);
+  const name = el("span", `name${a.poolActive ? " active" : ""}`, a.label);
   const badge = statusBadge(a, now);
   const head = el("div", "head");
-  head.append(name);
+  const who = el("span", "who");
+  who.append(dot, name);
+  head.append(who);
   if (badge.tone === "error") head.append(el("span", "note error", badge.label.toLowerCase()));
   else if (badge.tone === "warning") head.append(el("span", "note warning", badge.label.toLowerCase()));
+  else if (k.kind === "out") head.append(el("span", "note warning", "limit reached"));
   else if (a.nextChat) head.append(el("span", "note muted", "next for new chats"));
   const r = el("div", "row");
   r.append(head);

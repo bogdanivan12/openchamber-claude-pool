@@ -1,7 +1,7 @@
 import type { Account } from "../../shared/accounts.ts";
 import type { AccountState, WindowName } from "../../shared/state.ts";
 
-export type AccountView = Account & { state: AccountState | null; poolActive: boolean; nextChat?: boolean; canDeleteLogin: boolean };
+export type AccountView = Account & { state: AccountState | null; poolActive: boolean; nextChat?: boolean; available?: boolean; canDeleteLogin: boolean };
 
 export function duration(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60_000));
@@ -36,4 +36,13 @@ export function validateThreshold(text: string): { ok: true; value: number } | {
   const n = /^\d+$/.test(t) ? Number(t) : NaN;
   if (!Number.isInteger(n) || n < 50 || n > 100) return { ok: false, error: "Enter a whole number from 50 to 100." };
   return { ok: true, value: n };
+}
+
+export type AccountKind = "use" | "ready" | "out";
+/** In use now (green), available (neutral), unavailable because of a limit or sign-in (red). */
+export function accountKind(v: AccountView, now: number): { kind: AccountKind; label: string } {
+  const unavailable = v.state?.needsLogin || (v.state?.limitedUntil != null && v.state.limitedUntil > now) || v.available === false;
+  if (unavailable) return { kind: "out", label: "Unavailable" };
+  if (v.poolActive) return { kind: "use", label: "In use now" };
+  return { kind: "ready", label: "Available" };
 }

@@ -53,9 +53,11 @@ describe("status section smoke test (happy-dom, fake service)", () => {
     mount();
     await settle();
     const [first, second] = rows();
-    expect(first.textContent).toContain("● work");
+    expect(first.querySelector(".dot")?.className).toContain("use");
+    expect(first.querySelector(".dot")?.getAttribute("title")).toBe("In use now");
     expect(first.querySelector(".active")?.textContent).toContain("work");
-    expect(second.textContent).not.toContain("●");
+    expect(second.querySelector(".dot")?.className).toContain("ready");
+    expect(second.querySelector(".dot")?.getAttribute("title")).toBe("Available");
     const [five, seven] = Array.from(first.querySelectorAll(".win"));
     expect(five.textContent).toContain("5-Hour");
     expect(five.querySelector(".pct")?.textContent).toBe("72%");

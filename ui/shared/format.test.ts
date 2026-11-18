@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resetText, statusBadge, validateThreshold, windowPercent } from "./format.ts";
+import { accountKind, resetText, statusBadge, validateThreshold, windowPercent } from "./format.ts";
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
 const base = { id: "aaaaaa", label: "a", configDir: "/a", order: 0, enabled: true, poolActive: false, canDeleteLogin: false };
@@ -32,5 +32,16 @@ describe("format", () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error).toBe("Enter a whole number from 50 to 100.");
     }
+  });
+});
+
+describe("accountKind", () => {
+  const b = { id: "aaaaaa", label: "a", configDir: "/a", order: 0, enabled: true, poolActive: false, canDeleteLogin: false, state: null } as any;
+  it("separates in use, available and unavailable", () => {
+    expect(accountKind({ ...b, poolActive: true }, 1000).kind).toBe("use");
+    expect(accountKind(b, 1000).kind).toBe("ready");
+    expect(accountKind({ ...b, available: false }, 1000).kind).toBe("out");
+    expect(accountKind({ ...b, poolActive: true, state: { windows: {}, limitedUntil: 5000, needsLogin: false } }, 1000).kind).toBe("out");
+    expect(accountKind({ ...b, state: { windows: {}, limitedUntil: null, needsLogin: true } }, 1000).kind).toBe("out");
   });
 });
