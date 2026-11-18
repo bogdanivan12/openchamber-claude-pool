@@ -68,7 +68,7 @@ describe("login", () => {
   });
 });
 
-function harness(opts: { result?: "ok" | "bad"; startFails?: boolean; auth?: { loggedIn: boolean; email: string | null; plan: string | null } } = {}) {
+function harness(opts: { result?: "ok" | "bad"; startFails?: boolean; persist?: Parameters<typeof loginRoutes>[0] extends infer D ? (D extends { persist?: infer P } ? P : never) : never; auth?: { loggedIn: boolean; email: string | null; plan: string | null } } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "pool-login-"));
   const log = { envs: [] as Array<Record<string, string | undefined>>, cancels: 0, logouts: [] as string[], rms: [] as string[], order: [] as string[] };
   const relay: LoginRelay = {
@@ -85,6 +85,7 @@ function harness(opts: { result?: "ok" | "bad"; startFails?: boolean; auth?: { l
     authStatus: async () => opts.auth ?? { loggedIn: true, email: "n@x.test", plan: "pro" },
     logout: async (d) => { log.logouts.push(d); log.order.push("logout"); },
     rm: (p) => { log.rms.push(p); log.order.push("rm"); },
+    persist: opts.persist,
   });
   return { dataDir, log, routes };
 }
@@ -214,7 +215,7 @@ describe("login discarding a pending new account", () => {
     await call(routes, "POST /api/login/cancel");
     expect(log.logouts).toHaveLength(0);
     expect(log.rms).toHaveLength(0);
-    expect(log.cancels).toBeGreaterThan(0);
+    expect(log.cancels).toBe(4); // start, rejected code, start, cancel
     expect(readAccounts(dataDir).accounts).toHaveLength(1);
   });
 
@@ -238,7 +239,7 @@ describe("login discarding a pending new account", () => {
     expect(v).toMatchObject({ state: "awaiting-code", label: "Second" });
     expect(log.logouts).toEqual([first]);
     expect(log.rms).toEqual([first]);
-    expect(log.cancels).toBeGreaterThanOrEqual(1);
+    expect(log.cancels).toBe(1);
     expect(log.envs[1].CLAUDE_CONFIG_DIR).not.toBe(first);
   });
 
@@ -263,11 +264,150 @@ describe("login discarding a pending new account", () => {
     const routes = loginRoutes({ dataDir, relay, authStatus: async () => ({ loggedIn: true, email: "z@x.test", plan: "pro" }), logout: async () => {}, rm: (p) => { rms.push(p); } });
     await call(routes, "POST /api/login/start", { label: "X" });
     const inflight = call(routes, "POST /api/login/code", { code: "c" });
-    expect((await call(routes, "POST /api/login/code", { code: "again" })).status).toBe(409);
+    expect(await call(routes, "POST /api/login/code", { code: "again" })).toEqual({ status: 409, body: { error: "Not waiting for a code" } });
     await call(routes, "POST /api/login/cancel");
     release();
     expect((await inflight).body).toEqual({ state: "idle" });
     expect(readAccounts(dataDir).accounts).toEqual([]);
     expect(rms).toHaveLength(1);
+  });
+});
+
+describe("login fix round 1", () => {
+  const signedIn = { loggedIn: true, email: "b@x.test", plan: "pro" };
+
+  it("existing account: a rejected code fails even when authStatus says logged in; needsLogin stays", async () => {
+    const { dataDir, log, routes } = harness({ result: "bad", auth: signedIn });
+    addAccount(dataDir, "bbbbbb", "b");
+    updateState((s) => setNeedsLogin(s, "bbbbbb", true), dataDir);
+    await call(routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    log.cancels = 0;
+    expect((await call(routes, "POST /api/login/code", { code: "garbage" })).body).toEqual({ state: "failed", message: "Invalid code" });
+    expect(readState(dataDir).accounts.bbbbbb.needsLogin).toBe(true);
+    expect(log.cancels).toBe(1);
+    expect(log.logouts).toHaveLength(0);
+    expect(log.rms).toHaveLength(0);
+    expect((await call(routes, "GET /api/login")).body).toMatchObject({ state: "failed" });
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).status).toBe(409);
+  });
+
+  it("existing account: accepted code clears needsLogin", async () => {
+    const { dataDir, routes } = harness({ auth: signedIn });
+    addAccount(dataDir, "bbbbbb", "b");
+    updateState((s) => setNeedsLogin(s, "bbbbbb", true), dataDir);
+    await call(routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).body).toMatchObject({ state: "succeeded" });
+    expect(readState(dataDir).accounts.bbbbbb.needsLogin).toBe(false);
+  });
+
+  it("emailChanged is reported on re-sign-in with another known email, and the account is updated", async () => {
+    const { dataDir, routes } = harness({ auth: { loggedIn: true, email: "new@x.test", plan: "max" } });
+    addAccount(dataDir, "bbbbbb", "b", "old@x.test");
+    await call(routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    const v = (await call(routes, "POST /api/login/code", { code: "c" })).body as any;
+    expect(v).toMatchObject({ state: "succeeded", emailChanged: { from: "old@x.test", to: "new@x.test" }, account: { email: "new@x.test", plan: "max" } });
+    expect(readAccounts(dataDir).accounts[0].email).toBe("new@x.test");
+  });
+
+  it("no emailChanged when the email is unchanged (case-insensitive), unknown before, or a new account", async () => {
+    const same = harness({ auth: { loggedIn: true, email: "OLD@x.test", plan: "pro" } });
+    addAccount(same.dataDir, "bbbbbb", "b", "old@x.test");
+    await call(same.routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    expect(((await call(same.routes, "POST /api/login/code", { code: "c" })).body as any).emailChanged).toBeUndefined();
+    const unknown = harness({ auth: signedIn });
+    addAccount(unknown.dataDir, "bbbbbb", "b");
+    await call(unknown.routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    expect(((await call(unknown.routes, "POST /api/login/code", { code: "c" })).body as any).emailChanged).toBeUndefined();
+    const fresh = harness({ auth: signedIn });
+    await call(fresh.routes, "POST /api/login/start", { label: "N" });
+    expect(((await call(fresh.routes, "POST /api/login/code", { code: "c" })).body as any).emailChanged).toBeUndefined();
+  });
+
+  it("gone: re-sign-in of an account removed meanwhile fails and is not resurrected", async () => {
+    const { dataDir, log, routes } = harness({ auth: signedIn });
+    addAccount(dataDir, "bbbbbb", "b");
+    await call(routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    updateAccounts((f) => { f.accounts = []; }, dataDir);
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).body).toMatchObject({ state: "failed" });
+    expect(readAccounts(dataDir).accounts).toEqual([]);
+    expect(readState(dataDir).accounts.bbbbbb).toBeUndefined();
+    expect(log.rms).toHaveLength(0);
+    expect((await call(routes, "GET /api/login")).body).toMatchObject({ state: "failed" });
+  });
+
+  it("persistence failure of the account: failed view, relay cancelled, new dir discarded once, pending cleared", async () => {
+    const { dataDir, log, routes } = harness({ persist: { updateAccounts: () => { throw new Error("disk full"); } } });
+    await call(routes, "POST /api/login/start", { label: "X" });
+    const dir = log.envs[0].CLAUDE_CONFIG_DIR!;
+    log.cancels = 0;
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).body).toEqual({ state: "failed", message: "disk full" });
+    expect(log.cancels).toBe(1);
+    expect(log.logouts).toEqual([dir]);
+    expect(log.rms).toEqual([dir]);
+    expect(readAccounts(dataDir).accounts).toEqual([]);
+    expect((await call(routes, "GET /api/login")).body).toMatchObject({ state: "failed" });
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).status).toBe(409);
+  });
+
+  it("persistence failure for an existing account never removes its dir", async () => {
+    const { dataDir, log, routes } = harness({ auth: signedIn, persist: { updateAccounts: () => { throw new Error("disk full"); } } });
+    addAccount(dataDir, "bbbbbb", "b");
+    await call(routes, "POST /api/login/start", { accountId: "bbbbbb" });
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).body).toMatchObject({ state: "failed", message: "disk full" });
+    expect(log.logouts).toHaveLength(0);
+    expect(log.rms).toHaveLength(0);
+  });
+
+  it("needsLogin write failure after the account was saved: succeeded with a warning", async () => {
+    const { dataDir, log, routes } = harness({ persist: { updateState: () => { throw new Error("state locked"); } } });
+    await call(routes, "POST /api/login/start", { label: "X" });
+    const v = (await call(routes, "POST /api/login/code", { code: "c" })).body as any;
+    expect(v).toMatchObject({ state: "succeeded", warning: "state locked", account: { label: "X" } });
+    expect(readAccounts(dataDir).accounts).toHaveLength(1);
+    expect(log.rms).toHaveLength(0);
+    expect((await call(routes, "POST /api/login/code", { code: "c" })).status).toBe(409);
+  });
+
+  it("a code sent before the URL exists is 409", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pool-login-"));
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    const relay: LoginRelay = { start: async () => { await gate; return { state: "awaiting-code", url: "u" }; }, submit: async () => ({ ok: true }), cancel: () => {} };
+    const routes = loginRoutes({ dataDir, relay, authStatus: async () => signedIn, logout: async () => {}, rm: () => {} });
+    const starting = call(routes, "POST /api/login/start", { label: "X" });
+    expect(await call(routes, "POST /api/login/code", { code: "c" })).toEqual({ status: 409, body: { error: "Not waiting for a code" } });
+    release();
+    await starting;
+  });
+
+  it("start replacing a login that is verifying drops the late result and discards its dir exactly once", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pool-login-"));
+    let release!: () => void;
+    const gate = new Promise<void>((res) => { release = res; });
+    let submits = 0;
+    const statusDirs: string[] = [];
+    const envs: string[] = [];
+    const logouts: string[] = [];
+    const rms: string[] = [];
+    const relay: LoginRelay = {
+      start: async (env) => { envs.push(env.CLAUDE_CONFIG_DIR!); return { state: "awaiting-code", url: "u" }; },
+      submit: async () => { submits++; await gate; return { ok: true }; },
+      cancel: () => {},
+    };
+    const routes = loginRoutes({
+      dataDir, relay,
+      authStatus: async (d) => { statusDirs.push(d); return signedIn; },
+      logout: async (d) => { logouts.push(d); }, rm: (p) => { rms.push(p); },
+    });
+    await call(routes, "POST /api/login/start", { label: "First" });
+    const inflight = call(routes, "POST /api/login/code", { code: "c" });
+    await call(routes, "POST /api/login/start", { label: "Second" });
+    release();
+    expect((await inflight).body).toMatchObject({ state: "awaiting-code", label: "Second" });
+    expect(logouts).toEqual([envs[0]]);
+    expect(rms).toEqual([envs[0]]);
+    expect(statusDirs).toEqual([]); // no `claude auth status` against the discarded dir
+    expect(readAccounts(dataDir).accounts).toEqual([]);
+    expect(submits).toBe(1);
   });
 });

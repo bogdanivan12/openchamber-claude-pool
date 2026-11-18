@@ -7030,6 +7030,8 @@ function loginRoutes(deps = {}) {
   const authStatus = deps.authStatus ?? readAuthStatus;
   const logout = deps.logout ?? logoutDir;
   const rm = deps.rm ?? ((path) => rmSync2(path, { recursive: true, force: true }));
+  const saveAccounts = deps.persist?.updateAccounts ?? updateAccounts;
+  const saveState = deps.persist?.updateState ?? updateState;
   let pending = null;
   let view = { state: "idle" };
   const discard = async (p) => {
@@ -7102,8 +7104,8 @@ function loginRoutes(deps = {}) {
       const p = pending;
       if (!p)
         return { status: 409, body: { error: "no sign-in in progress" } };
-      if (view.state === "verifying")
-        return { status: 409, body: { error: "the code is already being checked" } };
+      if (view.state !== "awaiting-code")
+        return { status: 409, body: { error: "Not waiting for a code" } };
       const code = typeof input.code === "string" ? input.code.trim() : "";
       if (!code)
         return bad("paste the code from the Claude page");
@@ -7114,39 +7116,63 @@ function loginRoutes(deps = {}) {
       } catch (err) {
         submitted = { ok: false, message: err instanceof Error ? err.message : "" };
       }
-      const info = await authStatus(p.dir).catch(() => SIGNED_OUT2);
       if (pending !== p)
         return { status: 200, body: view };
-      if (!submitted.ok && !info.loggedIn) {
+      const info = p.created || submitted.ok ? await authStatus(p.dir).catch(() => SIGNED_OUT2) : SIGNED_OUT2;
+      if (pending !== p)
+        return { status: 200, body: view };
+      if (!submitted.ok && !(p.created && info.loggedIn)) {
         pending = null;
-        view = { state: "failed", message: submitted.message || "Claude Code did not accept the code." };
+        view = { state: "failed", message: !submitted.ok && submitted.message || "Claude Code did not accept the code." };
         await discard(p);
         return { status: 200, body: view };
       }
       let duplicateOf = null;
+      let emailChanged;
       let gone = false;
-      const file = updateAccounts((f) => {
-        duplicateOf = info.email ? f.accounts.find((a) => a.id !== p.id && a.email?.toLowerCase() === info.email.toLowerCase())?.id ?? null : null;
-        const acc = f.accounts.find((a) => a.id === p.id);
-        if (acc) {
-          if (info.email)
-            acc.email = info.email;
-          if (info.plan)
-            acc.plan = info.plan;
-        } else if (p.created) {
-          const label = uniqueLabel(p.label, f.accounts.map((a) => a.label));
-          f.accounts.push({ id: p.id, label, configDir: p.dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
-        } else {
-          gone = true;
-        }
-      }, dataDir);
+      let file;
+      try {
+        file = saveAccounts((f) => {
+          duplicateOf = info.email ? f.accounts.find((a) => a.id !== p.id && a.email?.toLowerCase() === info.email.toLowerCase())?.id ?? null : null;
+          const acc = f.accounts.find((a) => a.id === p.id);
+          if (acc) {
+            if (acc.email && info.email && acc.email.toLowerCase() !== info.email.toLowerCase())
+              emailChanged = { from: acc.email, to: info.email };
+            if (info.email)
+              acc.email = info.email;
+            if (info.plan)
+              acc.plan = info.plan;
+          } else if (p.created) {
+            const label = uniqueLabel(p.label, f.accounts.map((a) => a.label));
+            f.accounts.push({ id: p.id, label, configDir: p.dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
+          } else {
+            gone = true;
+          }
+        }, dataDir);
+      } catch (err) {
+        pending = null;
+        view = { state: "failed", message: err instanceof Error ? err.message : "Could not save the account." };
+        await discard(p);
+        return { status: 200, body: view };
+      }
       pending = null;
       if (gone) {
         view = { state: "failed", message: "This account was removed while signing in." };
         return { status: 200, body: view };
       }
-      updateState((s) => setNeedsLogin(s, p.id, false), dataDir);
-      view = { state: "succeeded", account: file.accounts.find((a) => a.id === p.id), duplicateOf };
+      let warning;
+      try {
+        saveState((s) => setNeedsLogin(s, p.id, false), dataDir);
+      } catch (err) {
+        warning = err instanceof Error ? err.message : "Could not clear the sign-in warning.";
+      }
+      view = {
+        state: "succeeded",
+        account: file.accounts.find((a) => a.id === p.id),
+        duplicateOf,
+        ...emailChanged ? { emailChanged } : {},
+        ...warning ? { warning } : {}
+      };
       return { status: 200, body: view };
     },
     "POST /api/login/cancel": async () => {

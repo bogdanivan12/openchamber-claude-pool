@@ -17,7 +17,7 @@ export type LoginView =
   | { state: "idle" }
   | { state: "awaiting-code"; url: string; accountId: string | null; label: string }
   | { state: "verifying" }
-  | { state: "succeeded"; account: Account; duplicateOf: string | null }
+  | { state: "succeeded"; account: Account; duplicateOf: string | null; emailChanged?: { from: string; to: string }; warning?: string }
   | { state: "failed"; message: string };
 
 const cliRelay: LoginRelay = {
@@ -47,12 +47,15 @@ export function loginRoutes(deps: {
   authStatus?: typeof readAuthStatus;
   logout?: (dir: string) => Promise<void>;
   rm?: (path: string) => void;
+  persist?: { updateAccounts?: typeof updateAccounts; updateState?: typeof updateState };
 } = {}): Record<string, Route> {
   const dataDir = deps.dataDir ?? poolDataDir();
   const relay = deps.relay ?? cliRelay;
   const authStatus = deps.authStatus ?? readAuthStatus;
   const logout = deps.logout ?? logoutDir;
   const rm = deps.rm ?? ((path: string) => rmSync(path, { recursive: true, force: true }));
+  const saveAccounts = deps.persist?.updateAccounts ?? updateAccounts;
+  const saveState = deps.persist?.updateState ?? updateState;
   let pending: Pending | null = null;
   let view: LoginView = { state: "idle" };
 
@@ -117,7 +120,7 @@ export function loginRoutes(deps: {
       if (!input) return NOT_OBJECT;
       const p = pending;
       if (!p) return { status: 409, body: { error: "no sign-in in progress" } };
-      if (view.state === "verifying") return { status: 409, body: { error: "the code is already being checked" } };
+      if (view.state !== "awaiting-code") return { status: 409, body: { error: "Not waiting for a code" } };
       const code = typeof input.code === "string" ? input.code.trim() : "";
       if (!code) return bad("paste the code from the Claude page");
 
@@ -126,41 +129,65 @@ export function loginRoutes(deps: {
       try { submitted = await relay.submit(code); } catch (err) {
         submitted = { ok: false, message: err instanceof Error ? err.message : "" };
       }
-      const info = await authStatus(p.dir).catch(() => SIGNED_OUT);
-      if (pending !== p) return { status: 200, body: view }; // cancelled or replaced while verifying
+      if (pending !== p) return { status: 200, body: view }; // cancelled or replaced while verifying; do not probe a discarded dir
+      // An existing account's dir already holds credentials (maybe revoked ones), so "logged in" proves nothing there:
+      // only the relay's own verdict counts. A new dir has none, so a logged-in status is real evidence.
+      const info = p.created || submitted.ok ? await authStatus(p.dir).catch(() => SIGNED_OUT) : SIGNED_OUT;
+      if (pending !== p) return { status: 200, body: view };
 
-      if (!submitted.ok && !info.loggedIn) {
+      if (!submitted.ok && !(p.created && info.loggedIn)) {
         pending = null;
-        view = { state: "failed", message: submitted.message || "Claude Code did not accept the code." };
+        view = { state: "failed", message: (!submitted.ok && submitted.message) || "Claude Code did not accept the code." };
         await discard(p);
         return { status: 200, body: view };
       }
 
       let duplicateOf: string | null = null;
+      let emailChanged: { from: string; to: string } | undefined;
       let gone = false;
-      const file = updateAccounts((f) => {
-        duplicateOf = info.email
-          ? f.accounts.find((a) => a.id !== p.id && a.email?.toLowerCase() === info.email!.toLowerCase())?.id ?? null
-          : null;
-        const acc = f.accounts.find((a) => a.id === p.id);
-        if (acc) {
-          if (info.email) acc.email = info.email;
-          if (info.plan) acc.plan = info.plan;
-        } else if (p.created) {
-          // The name was free at start; another account may have taken it since.
-          const label = uniqueLabel(p.label, f.accounts.map((a) => a.label));
-          f.accounts.push({ id: p.id, label, configDir: p.dir, order: f.accounts.length, enabled: true, ...(info.email ? { email: info.email } : {}), ...(info.plan ? { plan: info.plan } : {}) });
-        } else {
-          gone = true; // the account being signed in again was removed meanwhile; do not resurrect it
-        }
-      }, dataDir);
+      let file: ReturnType<typeof updateAccounts>;
+      try {
+        file = saveAccounts((f) => {
+          duplicateOf = info.email
+            ? f.accounts.find((a) => a.id !== p.id && a.email?.toLowerCase() === info.email!.toLowerCase())?.id ?? null
+            : null;
+          const acc = f.accounts.find((a) => a.id === p.id);
+          if (acc) {
+            if (acc.email && info.email && acc.email.toLowerCase() !== info.email.toLowerCase()) emailChanged = { from: acc.email, to: info.email };
+            if (info.email) acc.email = info.email;
+            if (info.plan) acc.plan = info.plan;
+          } else if (p.created) {
+            // The name was free at start; another account may have taken it since.
+            const label = uniqueLabel(p.label, f.accounts.map((a) => a.label));
+            f.accounts.push({ id: p.id, label, configDir: p.dir, order: f.accounts.length, enabled: true, ...(info.email ? { email: info.email } : {}), ...(info.plan ? { plan: info.plan } : {}) });
+          } else {
+            gone = true; // the account being signed in again was removed meanwhile; do not resurrect it
+          }
+        }, dataDir);
+      } catch (err) {
+        pending = null;
+        view = { state: "failed", message: err instanceof Error ? err.message : "Could not save the account." };
+        await discard(p);
+        return { status: 200, body: view };
+      }
       pending = null;
       if (gone) {
         view = { state: "failed", message: "This account was removed while signing in." };
         return { status: 200, body: view };
       }
-      updateState((s) => setNeedsLogin(s, p.id, false), dataDir);
-      view = { state: "succeeded", account: file.accounts.find((a) => a.id === p.id)!, duplicateOf };
+      let warning: string | undefined;
+      try {
+        saveState((s) => setNeedsLogin(s, p.id, false), dataDir);
+      } catch (err) {
+        warning = err instanceof Error ? err.message : "Could not clear the sign-in warning.";
+      }
+      view = {
+        state: "succeeded",
+        account: file.accounts.find((a) => a.id === p.id)!,
+        duplicateOf,
+        ...(emailChanged ? { emailChanged } : {}),
+        ...(warning ? { warning } : {}),
+      };
       return { status: 200, body: view };
     },
 
