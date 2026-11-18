@@ -7,7 +7,7 @@ Status: 0.1.0, not yet published.
 ## Requirements
 
 - OpenChamber 2.7.0 or later (desktop or web).
-- The Claude Code CLI (`claude`) on your `PATH`.
+- The Claude Code CLI (`claude`). It is found on your `PATH`, or in `~/.local/bin`, the npm global bin, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.claude/local`, `~/.bun/bin`, `~/.npm-global/bin`, `~/.volta/bin`, an nvm version folder (`~/.nvm/versions/node/*/bin`) or an fnm one, because the desktop app starts the server with a minimal `PATH`.
 - One or more Claude Pro or Max accounts. Only Claude subscription (claude.ai OAuth) logins are accepted; API-key, Bedrock and Vertex logins are refused.
 
 ## Install
@@ -16,7 +16,7 @@ Status: 0.1.0, not yet published.
 
 **From git, once the repository is published.** The intended location is `https://github.com/bogdanivan12/openchamber-claude-pool.git` (it does not exist yet). Settings → Extensions → Add, then paste that URL.
 
-Approve the permissions the extension asks for. The capability names below are paraphrased from the plan; OpenChamber's approval dialog may word them differently. It should also list the programs the service may run (`claude` and `security`, from `service.permissions.exec` in `package.json`). A local service runs with your user's full access, so only approve it if you trust this code.
+Approve the permissions the extension asks for. The capability names below are paraphrased from the plan; OpenChamber's approval dialog may word them differently. It should also list the programs the service may run: `claude` and `security`, from `service.permissions.exec` in `package.json`. What the service actually runs: `claude` (`auth status --json`, `auth logout`, `auth login --claudeai`, `--version`) and, on macOS, `security find-generic-password` (read-only). While looking for the CLI it also runs `npm prefix -g` and, on Windows for an npm install that only has `cli.js`, `node`. Neither `npm` nor `node` is declared in the manifest, so if OpenChamber enforces the list those probes are refused and the CLI is found through the fixed locations above instead. A local service runs with your user's full access, so only approve it if you trust this code.
 
 - Run a local service
 - Add a plugin to OpenCode
@@ -70,8 +70,9 @@ This is an independent community project, not affiliated with or endorsed by Ant
 
 - **macOS**: reads each account's Keychain item (the default folder uses `Claude Code-credentials`; other folders use a name derived from the folder path), falling back to the folder's `.credentials.json`. The first read may show a Keychain prompt.
 - **Windows**: reads `<folder>\.credentials.json`.
+- **Panel controls**: accounts are reordered with up/down buttons and the switch threshold is a text field (the design envisaged drag and drop and a slider).
 
-Windows status: the code paths and the automated tests are written for Windows and run in CI on windows-latest, but it has not been verified on a real Windows machine with real accounts. The UI has been tested headlessly (happy-dom), not yet visually in OpenChamber. The macOS end-to-end check in [docs/e2e-checklist.md](docs/e2e-checklist.md) is still to be run.
+Windows status: the code paths are written for Windows. On windows-latest CI runs the shared, service and UI tests and the pool-specific plugin tests (`bun run test:plugin:windows`); the full plugin suite, whose forked tests use shell-script fake CLIs and symlinks, runs on macOS only. It has not been verified on a real Windows machine with real accounts. The UI has been tested headlessly (happy-dom), not yet visually in OpenChamber. The macOS end-to-end check in [docs/e2e-checklist.md](docs/e2e-checklist.md) is still to be run.
 
 ## Development
 

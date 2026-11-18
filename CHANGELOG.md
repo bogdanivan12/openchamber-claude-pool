@@ -9,3 +9,4 @@
 - Usage card with the pool's current account windows on top and a group per account.
 - Work Status section with a 5h bar per account.
 - Committed bundles with a freshness check; CI on macOS and Windows.
+- Hardening after review: a Keychain denial or other credential read error no longer marks an account as signed out; `claude` is found in homebrew, nvm, volta, bun and npm-global locations; the default account never inherits the server's `CLAUDE_CONFIG_DIR`; rate-limit resets no longer leak across windows; transient file errors no longer empty the account list; directory comparison is case-insensitive on Windows; CI runs a portable plugin test subset on Windows.
