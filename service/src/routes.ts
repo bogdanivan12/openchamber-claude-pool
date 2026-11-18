@@ -1,4 +1,5 @@
 import { accountRoutes } from "./accounts-api.ts";
+import { loginRoutes } from "./login.ts";
 import { quotaRoute } from "./quota-route.ts";
 import type { Route } from "./http.ts";
 
@@ -9,3 +10,4 @@ export const routes: Record<string, Route> = {
 
 routes["POST /quota"] = quotaRoute();
 Object.assign(routes, accountRoutes());
+Object.assign(routes, loginRoutes());

@@ -12,21 +12,25 @@ import { findImportCandidates } from "./import.ts";
 
 const MAX_LABEL = 40;
 const NOT_SUBSCRIPTION = "not signed in to a Claude subscription (API-key and third-party logins are not supported)";
-const NAME_TAKEN = "Another account already uses this name";
+export const NAME_TAKEN = "Another account already uses this name";
 
 class NameTakenError extends Error {}
 
 /** The request body as a plain object; an empty body is `{}`; null if it is JSON of another shape. Bad JSON throws SyntaxError (the server answers 400). */
-function bodyObject(r: { body: string }): Record<string, unknown> | null {
+export function bodyObject(r: { body: string }): Record<string, unknown> | null {
   const value: unknown = r.body ? JSON.parse(r.body) : {};
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
-const NOT_OBJECT = { status: 400, body: { error: "Expected a JSON object" } };
-const bad = (message: string) => ({ status: 400, body: { error: message } });
+export const NOT_OBJECT = { status: 400, body: { error: "Expected a JSON object" } };
+export const bad = (message: string) => ({ status: 400, body: { error: message } });
 const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+/** Whether another account (not `exceptId`) already uses `label`, ignoring case and surrounding spaces. */
+export const labelTaken = (accounts: readonly Pick<Account, "id" | "label">[], label: string, exceptId?: string): boolean =>
+  accounts.some((a) => a.id !== exceptId && sameLabel(a.label, label));
+
 /** `base`, or `base 2`, `base 3`... the first one no other account uses; always <= 40 chars. */
-function uniqueLabel(base: string, taken: string[]): string {
+export function uniqueLabel(base: string, taken: string[]): string {
   const start = base.trim().slice(0, MAX_LABEL).trim();
   let label = start;
   for (let n = 2; taken.some((t) => sameLabel(t, label)); n++) {
@@ -144,7 +148,7 @@ export function accountRoutes(deps: {
           found = f.accounts.find((a) => a.id === id);
           if (!found) return;
           if (label !== undefined) {
-            if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label))) throw new NameTakenError(NAME_TAKEN);
+            if (labelTaken(f.accounts, label, id)) throw new NameTakenError(NAME_TAKEN);
             found.label = label;
           }
           if (typeof patch.enabled === "boolean") found.enabled = patch.enabled;

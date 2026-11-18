@@ -6064,6 +6064,7 @@ var accountsFile = (dataDir = poolDataDir()) => join2(dataDir, "accounts.json");
 var stateFile = (dataDir = poolDataDir()) => join2(dataDir, "state.json");
 var lockFile = (dataDir = poolDataDir()) => join2(dataDir, "state.lock");
 var defaultConfigDir = (home = homedir2()) => join2(home, ".claude");
+var newAccountDir = (id, dataDir = poolDataDir()) => join2(dataDir, "accounts", id);
 function normalizeDir(p, home = homedir2()) {
   let value = p.trim();
   if (value === "~")
@@ -6569,6 +6570,7 @@ function bodyObject(r) {
 var NOT_OBJECT = { status: 400, body: { error: "Expected a JSON object" } };
 var bad = (message) => ({ status: 400, body: { error: message } });
 var sameLabel = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+var labelTaken = (accounts, label, exceptId) => accounts.some((a) => a.id !== exceptId && sameLabel(a.label, label));
 function uniqueLabel(base, taken) {
   const start = base.trim().slice(0, MAX_LABEL).trim();
   let label = start;
@@ -6687,7 +6689,7 @@ function accountRoutes(deps = {}) {
           if (!found)
             return;
           if (label !== undefined) {
-            if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label)))
+            if (labelTaken(f.accounts, label, id))
               throw new NameTakenError(NAME_TAKEN);
             found.label = label;
           }
@@ -6749,6 +6751,410 @@ function accountRoutes(deps = {}) {
         file.threshold = t;
       }, dataDir);
       return { status: 200, body: { threshold: f.threshold } };
+    }
+  };
+}
+
+// service/src/login.ts
+import { mkdirSync as mkdirSync2, rmSync as rmSync2 } from "node:fs";
+
+// plugin/src/cli-login.ts
+import { spawn as spawn2 } from "node:child_process";
+var URL_TIMEOUT_MS = 30000;
+var VERIFY_TIMEOUT_MS = 120000;
+var IDLE_TIMEOUT_MS = 15 * 60000;
+var MAX_BUFFERED_OUTPUT = 64 * 1024;
+var ANSI_PATTERN = /\u001B\[[0-9;?]*[A-Za-z]/g;
+var URL_PATTERN = /https?:\/\/[^\s'"<>]+/g;
+var INVALID_CODE_PATTERN = /invalid code/i;
+var status = { state: "idle" };
+var child = null;
+var stdout = "";
+var stderr = "";
+var authorizeUrl = null;
+var urlWaiters = [];
+var verificationWaiters = [];
+var idleTimer = null;
+function isChildAlive() {
+  return Boolean(child && child.exitCode === null && !child.killed);
+}
+function extractAuthorizeUrl(text) {
+  const matches = text.match(URL_PATTERN);
+  if (!matches)
+    return null;
+  for (let index = matches.length - 1;index >= 0; index -= 1) {
+    const candidate = matches[index].replace(/[).,;:'"]+$/, "");
+    if (/oauth|authorize/i.test(candidate))
+      return candidate;
+  }
+  return null;
+}
+function appendOutput(current, chunk) {
+  const next = current + chunk.replace(ANSI_PATTERN, "");
+  return next.length > MAX_BUFFERED_OUTPUT ? next.slice(next.length - MAX_BUFFERED_OUTPUT) : next;
+}
+function resolveUrlWaiters(url) {
+  const waiters = urlWaiters;
+  urlWaiters = [];
+  for (const waiter of waiters)
+    waiter(url);
+}
+function resolveVerificationWaiters(result) {
+  const waiters = verificationWaiters;
+  verificationWaiters = [];
+  for (const waiter of waiters)
+    waiter(result);
+}
+function armIdleTimer() {
+  if (idleTimer)
+    clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (isChildAlive())
+      child?.kill();
+  }, IDLE_TIMEOUT_MS);
+  idleTimer.unref?.();
+}
+function teardown() {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+  child = null;
+}
+async function startClaudeCliLogin(options) {
+  if (!isChildAlive()) {
+    const env = buildClaudeCodeChildEnv(options?.env ?? process.env);
+    const binaryPath = options?.binaryPath === undefined ? await resolveClaudeCli(env) : options.binaryPath;
+    if (!binaryPath) {
+      status = {
+        state: "failed",
+        message: "Claude Code CLI (`claude`) was not found — install it via the provider's install action or with `npm install -g @anthropic-ai/claude-code`."
+      };
+      return status;
+    }
+    if (!isChildAlive()) {
+      const failure = launchLoginChild(binaryPath, env, options);
+      if (failure)
+        return failure;
+    }
+  }
+  if (authorizeUrl) {
+    status = { state: "awaiting-code", url: authorizeUrl };
+    return status;
+  }
+  const url = await waitForAuthorizeUrl(options?.urlTimeoutMs ?? URL_TIMEOUT_MS);
+  if (url) {
+    status = { state: "awaiting-code", url };
+    return status;
+  }
+  cancelClaudeCliLogin();
+  status = {
+    state: "failed",
+    message: firstMeaningfulLine(stderr) || "Claude Code CLI did not report a sign-in URL."
+  };
+  return status;
+}
+function launchLoginChild(binaryPath, env, options) {
+  stdout = "";
+  stderr = "";
+  authorizeUrl = null;
+  try {
+    const spawnLogin = options?.spawnLogin ?? spawn2;
+    const [command, args] = cliInvocation(binaryPath, ["auth", "login", "--claudeai"]);
+    const spawned = spawnLogin(command, args, {
+      cwd: options?.cwd ?? process.cwd(),
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true
+    });
+    child = spawned;
+    armIdleTimer();
+    spawned.stdout?.setEncoding?.("utf8");
+    spawned.stderr?.setEncoding?.("utf8");
+    spawned.stdout?.on("data", (chunk) => {
+      if (child !== spawned)
+        return;
+      stdout = appendOutput(stdout, String(chunk));
+      const url = extractAuthorizeUrl(stdout);
+      if (url && url !== authorizeUrl) {
+        authorizeUrl = url;
+        if (status.state !== "verifying") {
+          status = { state: "awaiting-code", url };
+        }
+        resolveUrlWaiters(url);
+      }
+    });
+    spawned.stderr?.on("data", (chunk) => {
+      if (child !== spawned)
+        return;
+      stderr = appendOutput(stderr, String(chunk));
+      if (INVALID_CODE_PATTERN.test(stderr)) {
+        resolveVerificationWaiters({
+          ok: false,
+          message: firstMeaningfulLine(stderr) || "Claude Code rejected the sign-in code."
+        });
+      }
+    });
+    spawned.stdin?.on("error", () => {});
+    spawned.once("error", (error) => {
+      if (child !== spawned)
+        return;
+      status = { state: "failed", message: error.message };
+      teardown();
+      resolveUrlWaiters(null);
+      resolveVerificationWaiters({ ok: false, message: error.message });
+    });
+    spawned.once("exit", (code, signal) => {
+      if (child !== spawned)
+        return;
+      teardown();
+      if (code !== 0 && status.state !== "succeeded") {
+        status = {
+          state: "failed",
+          message: describeExit(code, signal)
+        };
+      }
+      resolveUrlWaiters(null);
+      resolveVerificationWaiters(code === 0 ? { ok: true, message: "" } : {
+        ok: false,
+        message: firstMeaningfulLine(stderr) || describeExit(code, signal)
+      });
+    });
+  } catch (error) {
+    teardown();
+    status = {
+      state: "failed",
+      message: error instanceof Error ? error.message : String(error)
+    };
+    return status;
+  }
+  return null;
+}
+function waitForAuthorizeUrl(timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (url) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(url);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    urlWaiters.push(finish);
+  });
+}
+async function submitClaudeCliLoginCode(code, options) {
+  const trimmed = code.trim();
+  if (!trimmed)
+    return { ok: false, message: "No sign-in code was provided." };
+  if (!isChildAlive() || !child?.stdin?.writable) {
+    return {
+      ok: false,
+      message: "The Claude Code sign-in is no longer running — start the sign-in again."
+    };
+  }
+  stderr = "";
+  status = { state: "verifying" };
+  armIdleTimer();
+  try {
+    child.stdin.write(`${trimmed}
+`);
+  } catch (error) {
+    status = {
+      state: "failed",
+      message: error instanceof Error ? error.message : String(error)
+    };
+    return { ok: false, message: status.message };
+  }
+  const outcome = await waitForVerification(options?.verifyTimeoutMs ?? VERIFY_TIMEOUT_MS);
+  if (outcome.ok) {
+    status = { state: "succeeded" };
+    return { ok: true };
+  }
+  status = { state: "failed", message: outcome.message };
+  return { ok: false, message: outcome.message };
+}
+function waitForVerification(timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({
+      ok: false,
+      message: "Timed out waiting for Claude Code to accept the sign-in code."
+    }), timeoutMs);
+    verificationWaiters.push(finish);
+  });
+}
+function describeExit(code, signal) {
+  return `Claude Code login exited with ${signal ? `signal ${signal}` : `code ${code ?? "unknown"}`}.`;
+}
+function firstMeaningfulLine(text) {
+  return text.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0) ?? "";
+}
+function cancelClaudeCliLogin() {
+  if (isChildAlive())
+    child?.kill();
+  teardown();
+  authorizeUrl = null;
+  if (status.state === "awaiting-code" || status.state === "verifying") {
+    status = { state: "idle" };
+  }
+  resolveUrlWaiters(null);
+  resolveVerificationWaiters({
+    ok: false,
+    message: "The Claude Code sign-in was cancelled."
+  });
+}
+
+// service/src/login.ts
+var cliRelay = {
+  start: async (env) => {
+    const r = await startClaudeCliLogin({ env });
+    return r.state === "awaiting-code" ? r : { state: "failed", message: r.message };
+  },
+  submit: (code) => submitClaudeCliLoginCode(code),
+  cancel: () => cancelClaudeCliLogin()
+};
+var MAX_LABEL2 = 40;
+var SIGNED_OUT2 = { loggedIn: false, email: null, plan: null };
+function loginRoutes(deps = {}) {
+  const dataDir = deps.dataDir ?? poolDataDir();
+  const relay = deps.relay ?? cliRelay;
+  const authStatus = deps.authStatus ?? readAuthStatus;
+  const logout = deps.logout ?? logoutDir;
+  const rm = deps.rm ?? ((path) => rmSync2(path, { recursive: true, force: true }));
+  let pending = null;
+  let view = { state: "idle" };
+  const discard = async (p) => {
+    try {
+      relay.cancel();
+    } catch {}
+    if (!p?.created)
+      return;
+    try {
+      await logout(p.dir);
+    } catch {}
+    try {
+      rm(p.dir);
+    } catch {}
+  };
+  return {
+    "GET /api/login": () => ({ status: 200, body: view }),
+    "POST /api/login/start": async (r) => {
+      const input = bodyObject(r);
+      if (!input)
+        return NOT_OBJECT;
+      const { label, accountId } = input;
+      if (label !== undefined && typeof label !== "string")
+        return bad("Name must be text");
+      if (accountId !== undefined && typeof accountId !== "string")
+        return bad("accountId must be text");
+      let next;
+      if (accountId) {
+        const acc = readAccounts(dataDir).accounts.find((a) => a.id === accountId);
+        if (!acc)
+          return { status: 404, body: { error: "no such account" } };
+        next = { accountId, id: acc.id, label: acc.label, dir: acc.configDir, created: false };
+      } else {
+        const name = (label ?? "").trim();
+        if (!name || name.length > MAX_LABEL2)
+          return bad(`Name must be 1 to ${MAX_LABEL2} characters`);
+        const accounts = readAccounts(dataDir).accounts;
+        if (labelTaken(accounts, name))
+          return bad(NAME_TAKEN);
+        const id = newAccountId(accounts.map((a) => a.id));
+        const dir = newAccountDir(id, dataDir);
+        mkdirSync2(dir, { recursive: true });
+        next = { accountId: null, id, label: name, dir, created: true };
+      }
+      const previous = pending;
+      pending = next;
+      view = { state: "idle" };
+      await discard(previous);
+      let started;
+      try {
+        started = await relay.start(envForDir(next.dir));
+      } catch (err) {
+        started = { state: "failed", message: err instanceof Error ? err.message : "Could not start the Claude sign-in." };
+      }
+      if (pending !== next)
+        return { status: 200, body: view };
+      if (started.state === "failed") {
+        pending = null;
+        view = { state: "failed", message: started.message };
+        await discard(next);
+      } else {
+        view = { state: "awaiting-code", url: started.url, accountId: next.accountId, label: next.label };
+      }
+      return { status: 200, body: view };
+    },
+    "POST /api/login/code": async (r) => {
+      const input = bodyObject(r);
+      if (!input)
+        return NOT_OBJECT;
+      const p = pending;
+      if (!p)
+        return { status: 409, body: { error: "no sign-in in progress" } };
+      if (view.state === "verifying")
+        return { status: 409, body: { error: "the code is already being checked" } };
+      const code = typeof input.code === "string" ? input.code.trim() : "";
+      if (!code)
+        return bad("paste the code from the Claude page");
+      view = { state: "verifying" };
+      let submitted;
+      try {
+        submitted = await relay.submit(code);
+      } catch (err) {
+        submitted = { ok: false, message: err instanceof Error ? err.message : "" };
+      }
+      const info = await authStatus(p.dir).catch(() => SIGNED_OUT2);
+      if (pending !== p)
+        return { status: 200, body: view };
+      if (!submitted.ok && !info.loggedIn) {
+        pending = null;
+        view = { state: "failed", message: submitted.message || "Claude Code did not accept the code." };
+        await discard(p);
+        return { status: 200, body: view };
+      }
+      let duplicateOf = null;
+      let gone = false;
+      const file = updateAccounts((f) => {
+        duplicateOf = info.email ? f.accounts.find((a) => a.id !== p.id && a.email?.toLowerCase() === info.email.toLowerCase())?.id ?? null : null;
+        const acc = f.accounts.find((a) => a.id === p.id);
+        if (acc) {
+          if (info.email)
+            acc.email = info.email;
+          if (info.plan)
+            acc.plan = info.plan;
+        } else if (p.created) {
+          const label = uniqueLabel(p.label, f.accounts.map((a) => a.label));
+          f.accounts.push({ id: p.id, label, configDir: p.dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
+        } else {
+          gone = true;
+        }
+      }, dataDir);
+      pending = null;
+      if (gone) {
+        view = { state: "failed", message: "This account was removed while signing in." };
+        return { status: 200, body: view };
+      }
+      updateState((s) => setNeedsLogin(s, p.id, false), dataDir);
+      view = { state: "succeeded", account: file.accounts.find((a) => a.id === p.id), duplicateOf };
+      return { status: 200, body: view };
+    },
+    "POST /api/login/cancel": async () => {
+      const p = pending;
+      pending = null;
+      view = { state: "idle" };
+      await discard(p);
+      return { status: 200, body: view };
     }
   };
 }
@@ -7137,6 +7543,7 @@ var routes = {
 };
 routes["POST /quota"] = quotaRoute();
 Object.assign(routes, accountRoutes());
+Object.assign(routes, loginRoutes());
 
 // service/src/main.ts
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
