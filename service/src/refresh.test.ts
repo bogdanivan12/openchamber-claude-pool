@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { quotaProviderSchemasV1 } from "@openchamber/sdk/schemas";
@@ -68,6 +68,17 @@ describe("refreshAllUsage", () => {
     s = readState(dir);
     expect(s.accounts.aaaaaa.needsLogin).toBe(true);
     expect(s.accounts.aaaaaa.windows.five_hour?.usedPercent).toBe(40);
+  });
+
+  it("a corrupt accounts.json at write time does not block on the lock", async () => {
+    const corrupting = (async () => {
+      writeFileSync(join(dir, "accounts.json"), "{bad");
+      return Response.json(body);
+    }) as any;
+    const started = Date.now();
+    const out = await refreshAllUsage(dir, { readCredential, fetch: corrupting });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(Object.keys(out).sort()).toEqual(["aaaaaa", "bbbbbb"]);
   });
 
   it("does not write state for an account removed while the reads were in flight", async () => {

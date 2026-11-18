@@ -99,8 +99,10 @@ export async function refreshAllUsage(dataDir: string = poolDataDir(), deps: Usa
   const reads = await Promise.all(accounts.map((a) => readAccountUsage(a, deps)));
   const now = (deps.now ?? Date.now)();
   const out: Record<string, UsageRead> = {};
+  // Re-read just before the update, and outside the state lock: a corrupt accounts.json is
+  // repaired under that same non-reentrant lock and would wait out its timeout inside the callback.
+  const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
   updateState((s) => {
-    const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
     accounts.forEach((a, i) => {
       const r = reads[i];
       out[a.id] = r;
