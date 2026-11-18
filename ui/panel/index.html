@@ -1,1 +1,22 @@
-<!doctype html><html><body><div id="root"></div><script type="module" src="main.js"></script></body></html>
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Claude Pool</title>
+    <style>
+      html, body { margin: 0; }
+      #root { padding: 12px; font: inherit; }
+      .page { display: flex; flex-direction: column; gap: 12px; }
+      .stack { display: flex; flex-direction: column; gap: 8px; }
+      .acct { border-radius: var(--radius, 8px); padding: 10px; background: var(--muted, rgba(127,127,127,.08)); display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .grow { flex: 1; min-width: 0; }
+      .muted { opacity: .7; font-size: .9em; }
+      .bars { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 4px 8px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
