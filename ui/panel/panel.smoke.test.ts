@@ -49,7 +49,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     const t = text(root);
     expect(t).toContain("work");
     expect(t).toContain("w@x.com · MAX");
-    expect(t).toContain("Active in pool");
+    expect(t).toContain("In use now");
     expect(t).toContain("Disabled");
     expect(t).toContain("72%");
     expect(root.querySelectorAll("[role=progressbar]").length).toBeGreaterThanOrEqual(2);

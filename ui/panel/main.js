@@ -2434,7 +2434,9 @@ function statusBadge(v, now) {
   if (v.state?.limitedUntil && v.state.limitedUntil > now)
     return { label: `Limited · ${duration(v.state.limitedUntil - now)}`, tone: "warning" };
   if (v.poolActive)
-    return { label: "Active in pool", tone: "success" };
+    return { label: "In use now", tone: "success" };
+  if (v.nextChat)
+    return { label: "Next for new chats", tone: "neutral" };
   return { label: "Ready", tone: "neutral" };
 }
 function windowPercent(st, name, now) {

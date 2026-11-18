@@ -6648,7 +6648,10 @@ function accountRoutes(deps = {}) {
       const file = readAccounts(dataDir);
       const state = readState(dataDir);
       const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
-      const active = choice.kind === "account" ? choice.account.id : null;
+      const nextChat = choice.kind === "account" ? choice.account.id : null;
+      const enabledIds = new Set(enabledAccounts(file).map((a) => a.id));
+      const newest = Object.values(state.conversations).filter((b) => enabledIds.has(b.accountId)).sort((x, y) => y.at - x.at)[0];
+      const active = newest?.accountId ?? nextChat;
       return {
         status: 200,
         body: {
@@ -6659,6 +6662,7 @@ function accountRoutes(deps = {}) {
             ...a,
             state: state.accounts[a.id] ?? null,
             poolActive: a.id === active,
+            nextChat: a.id === nextChat && a.id !== active,
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir)
           }))
         }

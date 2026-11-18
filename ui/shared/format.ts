@@ -1,7 +1,7 @@
 import type { Account } from "../../shared/accounts.ts";
 import type { AccountState, WindowName } from "../../shared/state.ts";
 
-export type AccountView = Account & { state: AccountState | null; poolActive: boolean; canDeleteLogin: boolean };
+export type AccountView = Account & { state: AccountState | null; poolActive: boolean; nextChat?: boolean; canDeleteLogin: boolean };
 
 export function duration(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60_000));
@@ -15,7 +15,8 @@ export function statusBadge(v: AccountView, now: number): { label: string; tone:
   if (!v.enabled) return { label: "Disabled", tone: "neutral" };
   if (v.state?.needsLogin) return { label: "Sign in again", tone: "error" };
   if (v.state?.limitedUntil && v.state.limitedUntil > now) return { label: `Limited · ${duration(v.state.limitedUntil - now)}`, tone: "warning" };
-  if (v.poolActive) return { label: "Active in pool", tone: "success" };
+  if (v.poolActive) return { label: "In use now", tone: "success" };
+  if (v.nextChat) return { label: "Next for new chats", tone: "neutral" };
   return { label: "Ready", tone: "neutral" };
 }
 

@@ -46,6 +46,7 @@ function row(a: AccountView, now: number, out: Element[]): void {
   head.append(name);
   if (badge.tone === "error") head.append(el("span", "note error", badge.label.toLowerCase()));
   else if (badge.tone === "warning") head.append(el("span", "note warning", badge.label.toLowerCase()));
+  else if (a.nextChat) head.append(el("span", "note muted", "next for new chats"));
   const r = el("div", "row");
   r.append(head);
   for (const l of [windowLine("5-Hour", a, "five_hour", now), windowLine("7-Day Limit", a, "seven_day", now)]) if (l) r.append(l);

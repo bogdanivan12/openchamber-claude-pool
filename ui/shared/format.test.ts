@@ -9,7 +9,7 @@ describe("format", () => {
     expect(statusBadge({ ...base, enabled: false, state: null }, NOW)).toEqual({ label: "Disabled", tone: "neutral" });
     expect(statusBadge({ ...base, state: { windows: {}, limitedUntil: null, needsLogin: true } }, NOW)).toEqual({ label: "Sign in again", tone: "error" });
     expect(statusBadge({ ...base, state: { windows: {}, limitedUntil: NOW + 90 * 60_000, needsLogin: false } }, NOW)).toEqual({ label: "Limited · 1h 30m", tone: "warning" });
-    expect(statusBadge({ ...base, poolActive: true, state: null }, NOW)).toEqual({ label: "Active in pool", tone: "success" });
+    expect(statusBadge({ ...base, poolActive: true, state: null }, NOW)).toEqual({ label: "In use now", tone: "success" });
     expect(statusBadge({ ...base, state: null }, NOW)).toEqual({ label: "Ready", tone: "neutral" });
   });
   it("percent ignores expired windows", () => {

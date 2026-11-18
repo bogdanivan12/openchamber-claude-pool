@@ -228,6 +228,20 @@ describe("account api", () => {
     expect(logouts).toEqual([]);
   });
 
+  it("marks the account conversations run on as in use, and the router's pick for new chats separately", async () => {
+    const { home, dataDir, call } = setup();
+    await call("POST /api/import", { configDirs: [join(home, ".claude"), join(home, ".claude-b")] });
+    const [a, b] = readAccounts(dataDir).accounts;
+    updateState((st) => {
+      st.accounts[a.id] = { windows: { five_hour: { usedPercent: 79, resetsAt: null, updatedAt: 1 } }, limitedUntil: null, needsLogin: false };
+      st.accounts[b.id] = { windows: { five_hour: { usedPercent: 3, resetsAt: null, updatedAt: 1 } }, limitedUntil: null, needsLogin: false };
+      st.conversations.s1 = { accountId: a.id, at: Date.now() };
+    }, dataDir);
+    const out: any = await call("GET /api/accounts");
+    expect(out.body.accounts[0]).toMatchObject({ id: a.id, poolActive: true, nextChat: false });
+    expect(out.body.accounts[1]).toMatchObject({ id: b.id, poolActive: false, nextChat: true });
+  });
+
   it("lists accounts with their state, the picked account and the backup flag", async () => {
     const { home, dataDir, call } = setup();
     await call("POST /api/import", { configDirs: [join(home, ".claude"), join(home, ".claude-b")] });
