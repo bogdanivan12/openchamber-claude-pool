@@ -1,33 +1,10 @@
-# opencode-claude
+# Claude Pool plugin (fork of opencode-claude)
 
-[![npm](https://img.shields.io/npm/v/%40openchamber%2Fopencode-claude?style=flat&labelColor=100F0F&color=24837B)](https://www.npmjs.com/package/@openchamber/opencode-claude)
-[![GitHub release](https://img.shields.io/github/v/release/openchamber/opencode-claude?style=flat&labelColor=100F0F&color=205EA6)](https://github.com/openchamber/opencode-claude/releases/latest)
-[![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
+> This folder is the Claude Pool fork of opencode-claude, bundled into the extension; see the root README. The sign-in integration and the `configDirs` option described below were removed in the fork; providers are `claude-pool*`.
 
-> [!IMPORTANT]
-> **This plugin is no longer needed.** OpenCode 2.2.3 and later support Claude Code natively. Switch to the built-in provider and remove `@openchamber/opencode-claude` from your config. The repository is archived; the npm package stays available for a transition period.
-[![License](https://img.shields.io/badge/license-MIT-black?style=flat&labelColor=100F0F&color=EC8B49)](LICENSE)
+Upstream: [openchamber/opencode-claude](https://github.com/openchamber/opencode-claude) (MIT). Every request runs through the official [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) on top of the `claude` CLI installed on your machine. The plugin makes no calls to Anthropic itself and never writes or refreshes your Claude credentials.
 
-Use your Claude Pro or Max plan in [OpenCode](https://opencode.ai) and [OpenChamber](https://github.com/openchamber/openchamber).
-
-The plugin adds a **Claude Code** provider. Pick Opus, Fable, Sonnet or Haiku in OpenCode like any other model, and every request runs through the official [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) on top of the `claude` CLI installed on your machine. No API key, and the plugin never touches your Claude credentials.
-
-This is an independent community project. It isn't affiliated with, endorsed by, or supported by Anthropic. Claude and Claude Code are trademarks of Anthropic.
-
-## Terms of use: read this first
-
-Anthropic lets third-party apps use your Claude plan through the Agent SDK. Their guide, [Use the Claude Agent SDK with your Claude plan](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan), says how that usage is counted: it draws from your plan's usage limits, the same as `claude -p`. Anthropic has said the billing for third-party apps may change and that they'll announce it first, so check that page now and then.
-
-The plugin is built to stay inside those rules:
-
-- **Claude Code does all the talking to Anthropic.** The plugin calls the Agent SDK, the SDK runs your local `claude` CLI, and the CLI sends the requests. The plugin makes no calls to Anthropic itself.
-- **Your login stays with Claude Code.** Sign-in is `claude auth login`, run by the CLI. The plugin never reads, copies, stores or sends tokens.
-- **No disguise.** Claude is told plainly that it runs in OpenChamber (or OpenCode, when OpenChamber didn't start it) through the Claude Code harness, and its tools are named after that app. The plugin doesn't fake headers, rewrite Claude Code's system prompt, or hide that it's a third-party app.
-- **One person, one machine.** The proxy the plugin starts listens on `127.0.0.1` only and refuses requests from web pages. Don't expose it or share your plan with other people.
-- **Limits are respected.** When your plan hits a limit, you see the real error and the reset time. The plugin doesn't retry into a limit or route around it.
-- **Plans only.** If `claude` is signed in with a Console API key, or set up for Bedrock or Vertex, the plugin refuses. For API keys, use OpenCode's built-in Anthropic provider instead.
-
-You're responsible for how you use your own account. If you're unsure whether something is allowed, ask Anthropic.
+This is an independent community project. It isn't affiliated with, endorsed by, or supported by Anthropic. Claude and Claude Code are trademarks of Anthropic. Read "Use at your own risk" in the root README.
 
 ## How it works
 
@@ -50,39 +27,7 @@ Tools stay OpenCode's. Claude Code's built-in tools (its own Bash, Edit and so o
 
 Each OpenCode chat maps to one Claude Code session and resumes it on every message. That keeps Anthropic's prompt cache warm, which is what makes long sessions affordable on a plan.
 
-## Install
-
-You need [OpenCode](https://opencode.ai) 2.x and the [Claude Code CLI](https://www.npmjs.com/package/@anthropic-ai/claude-code) signed in to a Claude plan. OpenCode 1.x users stay on `@openchamber/opencode-claude@0.14`.
-
-1. Add the plugin:
-
-   ```bash
-   opencode plugin add @openchamber/opencode-claude
-   ```
-
-   Or add it to `~/.config/opencode/opencode.json` yourself:
-
-   ```json
-   { "plugins": ["@openchamber/opencode-claude"] }
-   ```
-
-2. Sign in. If you already use Claude Code in a terminal, you're probably signed in. Check with `claude auth status`. Otherwise:
-
-   ```bash
-   claude auth login --claudeai
-   ```
-
-   You can also sign in from OpenCode or OpenChamber: choose **Claude Code**, then **Sign in with Claude Code CLI**. It opens the same Claude sign-in page and passes the code you paste to the CLI. If `claude` isn't installed, the same menu offers to install it.
-
-3. Restart OpenCode and pick a model under **Claude Code**:
-
-   ```bash
-   opencode run "Summarise this repository in five bullets." --model claude-code/claude-sonnet-5
-   ```
-
-## Using it
-
-**Models.** The list comes from your own `claude` CLI, so you see what your account can use and it updates when Claude Code does. Most current models run with a 1M context; Opus 4.6 also comes as a separate 1M version. Context limits and effort levels show up in OpenCode's model details. Configs and agents have to name a listed id, like `claude-code/claude-opus-5-5`: aliases such as `opus` and ids the picker doesn't show aren't models here.
+## Notes
 
 **Fast mode.** Models your CLI runs in [fast mode](https://code.claude.com/docs/en/fast-mode) get a second entry, like "Opus 5.5 Fast". Fast turns draw your plan limits faster. If your account can't use fast mode, the turn runs at normal speed and the log says why.
 
@@ -96,59 +41,13 @@ You need [OpenCode](https://opencode.ai) 2.x and the [Claude Code CLI](https://w
 
 **Titles and summaries.** Session titles run as small one-off requests on Haiku, so they barely touch your limits. Compaction summaries are written by the chat's own model from its Claude session, so they cover the whole conversation with full tool results; most of it comes from the prompt cache. The session itself isn't changed.
 
-**Several Claude accounts.** Claude Code keeps one login per config directory. To run some projects on another account (say, a work plan), sign that account in with its own directory, then map project folders to it in the plugin options; the deepest matching folder wins and everything else stays on your default login:
-
-```bash
-CLAUDE_CONFIG_DIR=~/.claude-work claude auth login --claudeai
-```
-
-```json
-{ "plugins": [{ "package": "@openchamber/opencode-claude", "options": { "configDirs": { "~/work": "~/.claude-work" } } }] }
-```
-
-**Compacting earlier.** On 1M models OpenCode compacts a chat near 850K tokens, and every step of a long chat re-reads all of it. To compact sooner, set `compactAt` in the plugin options; Claude still has its full window for a turn that runs over:
-
-```json
-{ "plugins": [{ "package": "@openchamber/opencode-claude", "options": { "compactAt": 400000 } }] }
-```
-
-**Model fallback.** If Claude Code declines a request on one model and retries on another (for example Fable to Opus), you'll see a note in the reasoning, and the session switches to the model that's actually answering.
-
-## Keeping usage down
-
-Your plan's limits go mostly to context: each step of an agent loop re-reads the whole conversation from cache. A few habits help:
-
-- Start a new session for a new task instead of stretching one session over a day's work.
-- Coming back to a long session after a break costs more, because the cache has expired and the whole context is written again.
-- Plugins that rewrite OpenCode's history on every turn (context pruning and the like) break the cache and make every turn much more expensive with Claude.
-- 1M models compact around 90% of the window. If you don't need the room, the regular versions stay smaller.
-
-## Troubleshooting
-
-| What you see | What to do |
-| --- | --- |
-| No Claude Code provider in OpenCode | Check that `plugins` in `opencode.json` includes `@openchamber/opencode-claude`, then restart OpenCode |
-| Authentication error | Run `claude auth status`. If you're signed out or on an API key, run `claude auth login --claudeai` |
-| `claude` works with my company API key in the terminal but not in OpenCode | The plugin only runs on a Claude plan. With an API key or a company gateway you don't need this plugin at all: use OpenCode's built-in Anthropic provider |
-| "Model unavailable" on an old session | The model ids changed in 1.1. Pick the model again in that session |
-| A rate-limit error with a reset time | Your plan's limit was reached. It clears at the reset time, or on your next message if you reset your limits early |
-| Something else | Turn on the debug log (below) and share it in an issue or on Discord |
-
-**Debug log.** Add `"options": { "debug": true }` to the plugin entry:
-
-```json
-{ "plugins": [{ "package": "@openchamber/opencode-claude", "options": { "debug": true } }] }
-```
-
-The log goes to `~/.local/share/opencode-claude/debug.log`. It records one line per turn with token usage (steps, context per step, cache reads and writes), which is the quickest way to see where your limits go.
-
 ## Settings
 
 Most people won't need these. Set them in the environment of the OpenCode server.
 
 | Variable | What it does |
 | --- | --- |
-| `OPENCODE_CLAUDE_DEBUG=1` | Same as the `debug` option above |
+| `OPENCODE_CLAUDE_DEBUG=1` | Turn on the plugin debug log |
 | `OPENCODE_CLAUDE_PROXY_PORT` | Fixed port for the local proxy (default: any free port) |
 | `OPENCODE_CLAUDE_CWD` | Working directory for Claude Code, if you need to override the project folder |
 | `OPENCODE_CLAUDE_HISTORY_MAX_CHARS` | How much history to replay when a Claude session can't be resumed (default 400000, `0` turns it off) |
@@ -156,20 +55,6 @@ Most people won't need these. Set them in the environment of the OpenCode server
 | `OPENCODE_CLAUDE_PARKED_TURN_TTL_MS` | Close a turn waiting on tool results after this long (default 1 hour, `0` never) |
 | `OPENCODE_CLAUDE_RATE_LIMIT_FAST_FAIL=0` | Always send turns to Claude, even when a limit is known to be active |
 | `OPENCODE_CLAUDE_DYNAMIC_SECTIONS=keep` | Keep the working directory, memory path and git status in Claude Code's system prompt. By default they go in the first message instead, so every session shares the prompt and a new one reads it from the cache |
-
-## Development
-
-```bash
-bun install
-bun run build
-bun run test
-```
-
-To try a local build, point `plugins` at the checkout folder: `{ "plugins": ["/path/to/opencode-claude"] }`.
-
-Releases are cut with the **Release** workflow in GitHub Actions. It bumps the version, runs the tests, tags, and publishes to npm.
-
-Issues and pull requests are welcome at [openchamber/opencode-claude](https://github.com/openchamber/opencode-claude). Sibling plugins: [opencode-cursor](https://github.com/openchamber/opencode-cursor) and [opencode-commandcode](https://github.com/openchamber/opencode-commandcode).
 
 ## License
 
