@@ -1,7 +1,8 @@
-import { mkdirSync, watch } from "node:fs";
+import { mkdirSync, watch, type FSWatcher } from "node:fs";
 import { enabledAccounts, type AccountsFile } from "../../shared/accounts.ts";
 import { poolDataDir } from "../../shared/paths.ts";
 import { POOL_PROVIDER_ID } from "./constants.js";
+import { log } from "./log.js";
 
 export type PoolProviderSpec = { id: string; name: string };
 
@@ -24,16 +25,48 @@ export function poolProviderSpecs(file: AccountsFile): PoolProviderSpec[] {
 
 /** Event-driven: fires (debounced) when accounts.json is replaced. No polling. */
 export function watchAccounts(onChange: () => void, dataDir: string = poolDataDir()): () => void {
-  mkdirSync(dataDir, { recursive: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const watcher = watch(dataDir, (_event, name) => {
-    if (name && name !== "accounts.json") return;
-    clearTimeout(timer);
-    timer = setTimeout(onChange, 300);
-  });
+  let watcher: FSWatcher;
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    watcher = watch(dataDir, (_event, name) => {
+      if (name && name !== "accounts.json") return;
+      clearTimeout(timer);
+      timer = setTimeout(onChange, 300);
+      timer.unref?.();
+    });
+  } catch (err) {
+    log.warn("[claude-pool] could not watch accounts.json; provider changes need a plugin reload", err instanceof Error ? err.message : err);
+    return () => {};
+  }
   watcher.unref?.();
-  return () => {
+  const stop = () => {
     clearTimeout(timer);
-    watcher.close();
+    timer = undefined;
+    try {
+      watcher.close();
+    } catch {}
   };
+  watcher.on("error", (err) => {
+    log.warn("[claude-pool] accounts.json watcher failed; provider changes need a plugin reload", err instanceof Error ? err.message : err);
+    stop();
+  });
+  return stop;
+}
+
+const SESSION_PROVIDER_CAP = 500;
+const sessionProviders = new Map<string, string>();
+
+/** Module-level on purpose: the fallback handler is a process-wide singleton. */
+export function rememberSessionProvider(sessionID: string, providerID: string): void {
+  sessionProviders.delete(sessionID);
+  sessionProviders.set(sessionID, providerID);
+  if (sessionProviders.size > SESSION_PROVIDER_CAP) {
+    const oldest = sessionProviders.keys().next().value;
+    if (oldest !== undefined) sessionProviders.delete(oldest);
+  }
+}
+
+export function providerForSession(sessionID: string): string | undefined {
+  return sessionProviders.get(sessionID);
 }

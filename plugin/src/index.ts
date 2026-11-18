@@ -19,10 +19,9 @@ import {
   EFFORT_HEADER,
   KIND_HEADER,
   OPENAI_COMPATIBLE_PACKAGE,
-  POOL_PROVIDER_ID,
 } from "./constants.js";
 import { detectClaudeCode } from "./detect.js";
-import { accountFromProviderId, poolProviderSpecs, watchAccounts, type PoolProviderSpec } from "./pool.js";
+import { accountFromProviderId, poolProviderSpecs, providerForSession, rememberSessionProvider, watchAccounts, type PoolProviderSpec } from "./pool.js";
 import { log } from "./log.js";
 import {
   encodeClaudeModelSelection,
@@ -223,7 +222,6 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
       }
     });
 
-    const sessionProvider = new Map<string, string>();
     await ctx.session.hook("model.request", async (request) => {
       const providerID = (request.model as { providerID: string }).providerID;
       const account = accountFromProviderId(providerID);
@@ -240,7 +238,7 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
       // is commonly not the project attached to this plugin instance. Carry
       // the project directory so Claude Code loads the right project files.
       applyClaudeRequestContextHeaders(request.headers, directory, request.sessionID);
-      sessionProvider.set(request.sessionID, providerID);
+      rememberSessionProvider(request.sessionID, providerID);
     });
 
     const cliPresent = await probeCliPresence();
@@ -254,7 +252,11 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
     // Claude Code already moved the session to its fallback model; move the
     // OpenCode session too so the picker and the next turns match it.
     setModelFallbackHandler((sessionID, modelId, variant) => {
-      const providerID = sessionProvider.get(sessionID) ?? POOL_PROVIDER_ID;
+      const providerID = providerForSession(sessionID);
+      if (!providerID) {
+        log.info("[claude-pool] unknown session for model fallback; not switching");
+        return;
+      }
       void ctx.session
         .switchModel({
           sessionID,
