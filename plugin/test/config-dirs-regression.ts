@@ -8,24 +8,13 @@
  * Run: bun test/config-dirs-regression.ts
  */
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, mockHandle, startMockedProxy, textDelta } from "./helpers.ts";
 
 const SESSION = "sess-work";
 
 async function main() {
-  const { configDirForDirectory } = await import("../src/config-dir.ts");
-  const map = { "/src/work": "/cfg/work", "/src/work/client": "/cfg/client" };
-  assert.equal(configDirForDirectory(map, "/src/work"), "/cfg/work");
-  assert.equal(configDirForDirectory(map, "/src/work/app"), "/cfg/work");
-  assert.equal(configDirForDirectory(map, "/src/work/client/app"), "/cfg/client", "deepest folder wins");
-  assert.equal(configDirForDirectory(map, "/src/work-other"), undefined, "a sibling with the same prefix is not inside");
-  assert.equal(configDirForDirectory(map, "/src/home"), undefined);
-  assert.equal(configDirForDirectory({ "~/work": "~/.claude-work" }, join(homedir(), "work", "app")), join(homedir(), ".claude-work"));
-  assert.equal(configDirForDirectory({ "/src/work": 42 }, "/src/work"), undefined);
-  assert.equal(configDirForDirectory(undefined, "/src/work"), undefined);
-
   const defaultConfig = mkdtempSync(join(tmpdir(), "opencode-claude-cfg-default-"));
   const workConfig = mkdtempSync(join(tmpdir(), "opencode-claude-cfg-work-"));
   const cwd = mkdtempSync(join(tmpdir(), "opencode-claude-cfg-project-"));
@@ -42,7 +31,8 @@ async function main() {
 
   const send = (session: string, configDir?: string) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
-    applyClaudeRequestContextHeaders(headers, cwd, session, configDir);
+    applyClaudeRequestContextHeaders(headers, cwd, session);
+    if (configDir) headers["x-opencode-claude-config-dir"] = encodeURIComponent(configDir);
     return fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
       method: "POST",
       headers,

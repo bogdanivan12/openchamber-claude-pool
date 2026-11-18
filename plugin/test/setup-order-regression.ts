@@ -34,6 +34,12 @@ esac
   process.env.PATH = `${bin}:/usr/bin:/bin`;
   process.env.HOME = tmp;
   process.env.XDG_DATA_HOME = tmp;
+  // Providers exist only for accounts: seed one (pool + account provider per setup).
+  process.env.CLAUDE_POOL_HOME = join(tmp, "pool");
+  const { updateAccounts } = await import("../../shared/accounts.ts");
+  updateAccounts((f) => {
+    f.accounts.push({ id: "aaaaaa", label: "work", configDir: "~/.claude", order: 0, enabled: true });
+  });
 
   const { ClaudeCodePlugin } = await import("../src/index.ts");
   const started = Date.now();
@@ -58,10 +64,6 @@ esac
           },
           switchModel: async () => {},
         },
-        integration: {
-          transform: async (fn: (i: unknown) => void) =>
-            fn({ method: { update: () => {} }, update: () => {} }),
-        },
         event: {
           subscribe: ({ signal }: { signal: AbortSignal }) =>
             (async function* () {
@@ -76,7 +78,7 @@ esac
   const b = fakeContext();
   const setups = Promise.all([ClaudeCodePlugin.setup(a.ctx), ClaudeCodePlugin.setup(b.ctx)]);
   await new Promise((r) => setTimeout(r, 600));
-  assert.equal(registered.length, 2, "both providers registered while the probe runs");
+  assert.equal(registered.length, 4, "both setups registered pool + account providers while the probe runs");
   assert.equal(hooked.length, 2, "both request hooks registered while the probe runs");
   const disposers = await setups;
   const authCalls = readFileSync(calls, "utf8").split("\n").filter((l) => l.startsWith("auth"));

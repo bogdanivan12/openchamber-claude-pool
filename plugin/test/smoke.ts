@@ -33,13 +33,11 @@ async function main() {
   const { conversationKeyFromMessages } = await import(
     "../src/session-store.ts"
   );
-  const { isClaudeEffort, PROVIDER_ID, EFFORT_LEVELS } = await import(
+  const { isClaudeEffort, EFFORT_LEVELS } = await import(
     "../src/constants.ts"
   );
   const {
     applyClaudeRequestContextHeaders,
-    buildAuthMethods,
-    manualInstallResponse,
     ClaudeCodePlugin,
     buildProviderInfo,
     buildClaudeProviderModels,
@@ -1009,14 +1007,14 @@ async function main() {
   }
 
   // Plugin export
-  assert.equal(ClaudeCodePlugin.id, "openchamber.claude-code");
+  assert.equal(ClaudeCodePlugin.id, "claude-pool");
   assert.equal(typeof ClaudeCodePlugin.setup, "function");
   {
-    const info: any = buildProviderInfo("http://127.0.0.1:1/v1");
+    const info: any = buildProviderInfo("http://127.0.0.1:1/v1", { id: "claude-pool", name: "Claude Pool" });
     assert.equal(info.activation, "enabled");
     assert.equal(info.package, "@opencode/ai/providers/openai-compatible");
     assert.equal(info.settings.baseURL, "http://127.0.0.1:1/v1");
-    const listed: any[] = buildClaudeProviderModels(getClaudeModels());
+    const listed: any[] = buildClaudeProviderModels(getClaudeModels(), "claude-pool");
     const sonnetModel = listed.find((m) => m.id === "claude-sonnet-5");
     // No input limit on 1M models: OpenCode keeps its own 15% free.
     const oneM = listed.find((m) => m.limit.context === 1_000_000);
@@ -1025,46 +1023,20 @@ async function main() {
     // compactAt: OpenCode compacts at input minus its 15% reserve, so the
     // input limit puts that point at the option; the window stays 1M and
     // smaller models are left alone.
-    const early: any[] = buildClaudeProviderModels(getClaudeModels(), 400_000);
+    const early: any[] = buildClaudeProviderModels(getClaudeModels(), "claude-pool", 400_000);
     const earlySonnet = early.find((m) => m.id === "claude-sonnet-5");
     assert.equal(earlySonnet.limit.context, 1_000_000);
     assert.equal(earlySonnet.limit.input, 470_588);
     assert.equal(Math.round(earlySonnet.limit.input * 0.85), 400_000);
     assert.equal(early.find((m) => m.limit.context === 200_000)?.limit.input, undefined);
     for (const bad of [undefined, "400000", 0, -1, Number.NaN]) {
-      assert.equal(buildClaudeProviderModels(getClaudeModels(), bad).find((m: any) => m.id === "claude-sonnet-5")!.limit.input, undefined);
+      assert.equal(buildClaudeProviderModels(getClaudeModels(), "claude-pool", bad).find((m: any) => m.id === "claude-sonnet-5")!.limit.input, undefined);
     }
     assert.deepEqual(
       sonnetModel.variants.map((v: any) => v.id),
       buildEffortVariants(getClaudeModels().find((m) => m.id === "claude-sonnet-5")!),
     );
     assert.deepEqual(sonnetModel.capabilities.input, ["text", "image", "pdf"]);
-  }
-
-  // Auth methods mirror CLI presence: install only when missing, relay only
-  // when present, and every path carries the terminal alternative. The method
-  // bodies are not invoked here — on a CI host without the CLI the install
-  // method would run a real `npm install -g` — so the terminal fallback is
-  // exercised through its pure builder instead.
-  {
-    const withoutCli: any[] = buildAuthMethods(false, "/tmp");
-    assert.equal(withoutCli.length, 1);
-    assert.equal(withoutCli[0].integrationID, "claude-code");
-    assert.equal(
-      withoutCli[0].method.label,
-      "Install Claude Code CLI and sign in",
-    );
-
-    const withCli: any[] = buildAuthMethods(true, "/tmp");
-    assert.equal(withCli.length, 1);
-    assert.equal(withCli[0].method.label, "Sign in with Claude Code CLI");
-
-    // The fallback instructions always name both the install and the auth
-    // command, whatever the launch failure message was.
-    const fallback = manualInstallResponse("boom", "claude-cli");
-    assert.match(fallback.instructions, /npm install -g @anthropic-ai\/claude-code/);
-    assert.match(fallback.instructions, /claude auth login --claudeai/);
-    assert.equal(fallback.mode, "auto");
   }
 
   const requestHeaders: Record<string, string> = {};
@@ -1078,7 +1050,6 @@ async function main() {
     "/data/projects/infra",
   );
   assert.equal(requestHeaders["x-opencode-claude-session"], "ses_test");
-  assert.equal(PROVIDER_ID, "claude-code");
   // Refusal fallback: note in reasoning, OpenCode session follows the model
   {
     const { catalogIdForFallback, modelFallbackNote, setModelFallbackHandler, setClaudeQueryStarter, startProxy, getClaudeProxyBaseUrl } =

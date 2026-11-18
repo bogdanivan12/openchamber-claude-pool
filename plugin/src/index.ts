@@ -12,21 +12,17 @@
 // Type-only: the v2 host loads a plain `{ id, setup }` object, so the plugin
 // needs none of OpenCode's runtime packages.
 import type { Model, Plugin, Provider } from "@opencode/plugin";
-import { configDirForDirectory } from "./config-dir.js";
+import { readAccounts } from "../../shared/accounts.ts";
 import {
-  CONFIG_DIR_HEADER,
+  ACCOUNT_HEADER,
   DIRECTORY_HEADER,
   EFFORT_HEADER,
   KIND_HEADER,
   OPENAI_COMPATIBLE_PACKAGE,
-  PROVIDER_ID,
+  POOL_PROVIDER_ID,
 } from "./constants.js";
 import { detectClaudeCode } from "./detect.js";
-import { installClaudeCli } from "./cli-install.js";
-import {
-  startClaudeCliLogin,
-  submitClaudeCliLoginCode,
-} from "./cli-login.js";
+import { accountFromProviderId, poolProviderSpecs, watchAccounts, type PoolProviderSpec } from "./pool.js";
 import { log } from "./log.js";
 import {
   encodeClaudeModelSelection,
@@ -54,20 +50,14 @@ export function applyClaudeRequestContextHeaders(
   headers: Record<string, string>,
   directory: string,
   sessionID?: string,
-  configDir?: string,
 ): void {
   // Header values must be Latin-1: fetch rejects a raw path like C:\项目.
   headers[DIRECTORY_HEADER] = encodeURIComponent(directory);
   if (sessionID) headers["x-opencode-claude-session"] = sessionID;
-  if (configDir) headers[CONFIG_DIR_HEADER] = encodeURIComponent(configDir);
 }
 
 type ProviderInfo = Provider.Info;
 type ModelInfo = Model.Info;
-type IntegrationEditor = Parameters<
-  Parameters<Plugin.Context["integration"]["transform"]>[0]
->[0];
-type AuthRegistration = Parameters<IntegrationEditor["method"]["update"]>[0];
 
 /** OpenCode keeps this share of the window free before it compacts. */
 const COMPACTION_RESERVE_SHARE = 0.15;
@@ -85,12 +75,12 @@ export function compactionInputLimit(model: ClaudeModel, compactAt: unknown): nu
   return input < model.contextWindow ? input : undefined;
 }
 
-export function buildProviderModel(model: ClaudeModel, id: string, compactAt?: unknown): ModelInfo {
+export function buildProviderModel(model: ClaudeModel, id: string, providerID: string, compactAt?: unknown): ModelInfo {
   const input = compactionInputLimit(model, compactAt);
   return {
     id,
     modelID: id,
-    providerID: PROVIDER_ID,
+    providerID,
     name: model.name,
     capabilities: {
       tools: true,
@@ -115,23 +105,18 @@ export function buildProviderModel(model: ClaudeModel, id: string, compactAt?: u
   } as unknown as ModelInfo;
 }
 
-export function buildClaudeProviderModels(models: ClaudeModel[], compactAt?: unknown): ModelInfo[] {
-  return models.map((model) => buildProviderModel(model, model.id, compactAt));
+export function buildClaudeProviderModels(models: ClaudeModel[], providerID: string, compactAt?: unknown): ModelInfo[] {
+  return models.map((model) => buildProviderModel(model, model.id, providerID, compactAt));
 }
 
-export function buildProviderInfo(baseURL: string): ProviderInfo {
+export function buildProviderInfo(baseURL: string, spec: PoolProviderSpec): ProviderInfo {
   return {
-    id: PROVIDER_ID,
-    name: "Claude Code",
-    // Availability follows the local CLI login, not an OpenCode credential:
-    // the integration below is only the sign-in button.
+    id: spec.id,
+    name: spec.name,
+    // Accounts are managed by the Claude Pool extension, not an OpenCode credential.
     activation: "enabled",
     package: OPENAI_COMPATIBLE_PACKAGE,
-    settings: {
-      baseURL,
-      provider: PROVIDER_ID,
-      apiKey: "claude-code-proxy",
-    },
+    settings: { baseURL, provider: spec.id, apiKey: "claude-pool-proxy" },
   } as unknown as ProviderInfo;
 }
 
@@ -203,15 +188,11 @@ function currentProxyBaseUrl(): string {
 }
 
 /**
- * OpenCode v2 plugin that provides Claude Code authentication and model access.
- *
- * The auth methods are chosen once at load from the CLI's presence: a host
- * with `claude` gets the sign-in relay, a host without it gets the install
- * action. `authorize` re-detects at run time, so the install action still
- * relays the sign-in right after a successful install.
+ * OpenCode v2 plugin that registers the Claude Pool provider and one provider
+ * per enabled account in accounts.json. Sign-in is owned by the Claude CLI.
  */
 export const ClaudeCodePlugin: Plugin.Plugin = {
-  id: "openchamber.claude-code",
+  id: "claude-pool",
   async setup(ctx) {
     // `{ "package": "...", "options": { "debug": true } }` in opencode.json
     // turns on the durable debug log without touching the server's env.
@@ -219,11 +200,6 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
       process.env.OPENCODE_CLAUDE_DEBUG ??= "1";
     }
     const directory = ctx.location.directory;
-    // A project mapped to another Claude account in the `configDirs` option.
-    const configDir = configDirForDirectory(
-      (ctx.options as { configDirs?: unknown } | undefined)?.configDirs,
-      directory,
-    );
     // Bind first (ephemeral port by default) so the provider points at the
     // live listener for this process.
     try {
@@ -238,41 +214,34 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
     // models are missing from OpenCode's catalog, and a session stepping
     // during a plugin reload fails with "Model unavailable".
     await ctx.provider.transform((providers) => {
-      providers.add({
-        info: buildProviderInfo(currentProxyBaseUrl()),
-        models: buildClaudeProviderModels(
-          getClaudeModels(),
-          (ctx.options as { compactAt?: unknown } | undefined)?.compactAt,
-        ),
-      });
+      const compactAt = (ctx.options as { compactAt?: unknown } | undefined)?.compactAt;
+      for (const spec of poolProviderSpecs(readAccounts())) {
+        providers.add({
+          info: buildProviderInfo(currentProxyBaseUrl(), spec),
+          models: buildClaudeProviderModels(getClaudeModels(), spec.id, compactAt),
+        });
+      }
     });
 
-    await ctx.session.hook(
-      "model.request",
-      async (request) => {
-        // Start late if setup could not bind, and always point at the live
-        // listener in case it rebound since the provider was registered.
-        await startProxy();
-        request.baseURL = getClaudeProxyBaseUrl();
-        const selected = resolveClaudeModelSelection(
-          request.model.id,
-          request.model.variant,
-        );
-        request.headers[EFFORT_HEADER] = encodeClaudeModelSelection(selected);
-        request.headers[KIND_HEADER] = request.kind;
-        // The proxy runs in the long-lived OpenCode server process, whose cwd
-        // is commonly the service account home, not the project attached to
-        // this plugin instance. Carry the project directory on every request
-        // so Claude Code loads the right project files, settings, and AGENTS.md.
-        applyClaudeRequestContextHeaders(
-          request.headers,
-          directory,
-          request.sessionID,
-          configDir,
-        );
-      },
-      { providerID: PROVIDER_ID },
-    );
+    const sessionProvider = new Map<string, string>();
+    await ctx.session.hook("model.request", async (request) => {
+      const providerID = (request.model as { providerID: string }).providerID;
+      const account = accountFromProviderId(providerID);
+      if (account === null) return;
+      // Start late if setup could not bind, and always point at the live
+      // listener in case it rebound since the provider was registered.
+      await startProxy();
+      request.baseURL = getClaudeProxyBaseUrl();
+      const selected = resolveClaudeModelSelection(request.model.id, request.model.variant);
+      request.headers[EFFORT_HEADER] = encodeClaudeModelSelection(selected);
+      request.headers[KIND_HEADER] = request.kind;
+      request.headers[ACCOUNT_HEADER] = account;
+      // The proxy runs in the long-lived OpenCode server process, whose cwd
+      // is commonly not the project attached to this plugin instance. Carry
+      // the project directory so Claude Code loads the right project files.
+      applyClaudeRequestContextHeaders(request.headers, directory, request.sessionID);
+      sessionProvider.set(request.sessionID, providerID);
+    });
 
     const cliPresent = await probeCliPresence();
     // Refresh the catalog from the CLI in the background; the cached or
@@ -281,150 +250,41 @@ export const ClaudeCodePlugin: Plugin.Plugin = {
       void refreshModelCatalog(() => ctx.provider.reload());
     }
 
-    await ctx.integration.transform((integrations) => {
-      for (const registration of buildAuthMethods(cliPresent, directory)) {
-        integrations.method.update(registration);
-      }
-      integrations.update(PROVIDER_ID, (integration) => {
-        integration.name = "Claude Code";
-      });
-    });
-
     const stopWatching = watchSessionInterrupts(ctx);
     // Claude Code already moved the session to its fallback model; move the
     // OpenCode session too so the picker and the next turns match it.
     setModelFallbackHandler((sessionID, modelId, variant) => {
+      const providerID = sessionProvider.get(sessionID) ?? POOL_PROVIDER_ID;
       void ctx.session
         .switchModel({
           sessionID,
-          model: { id: modelId, providerID: PROVIDER_ID, ...(variant ? { variant } : {}) },
+          model: { id: modelId, providerID, ...(variant ? { variant } : {}) },
         })
         .catch((err: unknown) =>
           log.warn(
-            "[opencode-claude] could not switch the session to the fallback model",
+            "[claude-pool] could not switch the session to the fallback model",
             err instanceof Error ? err.message : err,
           ),
         );
     });
 
+    const stopAccountsWatch = watchAccounts(() => {
+      void ctx.provider.reload().catch((err: unknown) =>
+        log.warn("[claude-pool] provider reload failed", err instanceof Error ? err.message : err),
+      );
+    });
+
     return async () => {
+      stopAccountsWatch();
       stopWatching();
       await releaseProxy();
     };
   },
 };
 
-const INSTALL_METHOD_ID = "claude-cli-install";
-const SIGN_IN_METHOD_ID = "claude-cli";
-
 /**
- * OpenCode v2 stores whatever an OAuth method resolves with. The CLI keeps
- * its own login, so this is only a "signed in" marker: no token, nothing
- * Claude could use, and no refresh hook, so OpenCode never renews it.
- */
-function cliSignInMarker(methodID: string) {
-  return {
-    type: "oauth" as const,
-    methodID,
-    refresh: "claude-cli",
-    access: "claude-cli",
-    expires: 0,
-  } as any;
-}
-
-/**
- * The method list mirrors what the host actually needs: only the sign-in relay
- * when the CLI is there, only the install action when it is not. Each
- * `authorize` re-detects, so the install action rolls straight into the relay
- * after a successful install without a restart.
- */
-export function buildAuthMethods(
-  cliPresent: boolean,
-  directory: string,
-): AuthRegistration[] {
-  if (!cliPresent) {
-    const methodID = INSTALL_METHOD_ID;
-    return [
-      {
-        integrationID: PROVIDER_ID,
-        method: {
-          id: methodID,
-          type: "oauth",
-          label: "Install Claude Code CLI and sign in",
-        },
-        /**
-         * One-click path for hosts without the CLI: install the official
-         * Claude Code CLI, then continue with the same sign-in relay. Users
-         * who prefer the terminal get the install and auth commands in the
-         * instructions instead.
-         */
-        async authorize() {
-          const detection = await detectClaudeCode();
-          if (detection.loggedIn) {
-            return alreadySignedInResponse(methodID);
-          }
-          if (detection.status === "missing-cli") {
-            const install = await installClaudeCli();
-            if (!install.ok) {
-              log.warn("[opencode-claude] Claude CLI install failed", {
-                message: install.message,
-              });
-              return manualInstallResponse(install.message, methodID);
-            }
-          } else if (detection.status === "missing-sdk") {
-            return manualInstallResponse(
-              "The Claude Agent SDK is unavailable in this plugin install. Reinstall the plugin, then sign in again.",
-              methodID,
-            );
-          }
-          return relayOrFallback(
-            await startClaudeCliLogin({ cwd: directory }),
-            methodID,
-          );
-        },
-      } as AuthRegistration,
-    ];
-  }
-
-  const methodID = SIGN_IN_METHOD_ID;
-  return [
-    {
-      integrationID: PROVIDER_ID,
-      method: {
-        id: methodID,
-        type: "oauth",
-        label: "Sign in with Claude Code CLI",
-      },
-      /**
-       * The official CLI runs the whole flow; the host only relays it.
-       * `claude auth login --claudeai` prints an authorize URL and then
-       * waits on stdin for the code the Claude page shows, so the host UI
-       * can open that URL and pass the pasted code straight through —
-       * no separate terminal, and no OAuth implemented here.
-       *
-       * The only URL this method ever hands out is the CLI's own sign-in
-       * page: any other link would open a tab that cannot finish the
-       * sign-in, competing with the page the user actually has to use.
-       */
-      async authorize() {
-        const detection = await detectClaudeCode();
-        if (detection.loggedIn) {
-          return alreadySignedInResponse(methodID);
-        }
-        return relayOrFallback(
-          await startClaudeCliLogin({ cwd: directory }),
-          methodID,
-        );
-      },
-    } as AuthRegistration,
-  ];
-}
-
-/**
- * CLI presence check for the method list, capped so a slow probe can never
- * block plugin load. Unknown results default to "present": the sign-in relay
- * re-detects and falls back to terminal instructions if the CLI is actually
- * missing.
+ * CLI presence check for the model refresh, capped so a slow probe can never
+ * block plugin load. Unknown results default to "present".
  */
 async function probeCliPresence(): Promise<boolean> {
   if (cliPresentAt && Date.now() - cliPresentAt < CLI_PRESENT_TTL_MS) return true;
@@ -457,88 +317,6 @@ async function probeCliPresence(): Promise<boolean> {
 const CLI_PRESENT_TTL_MS = 5 * 60_000;
 let cliProbe: Promise<boolean> | undefined;
 let cliPresentAt = 0;
-
-function alreadySignedInResponse(methodID: string) {
-  return {
-    url: "",
-    instructions:
-      "Claude Code CLI is already signed in. Click Complete — or sign in from a terminal instead with `claude auth login --claudeai`.",
-    mode: "auto" as const,
-    callback: Promise.resolve(cliSignInMarker(methodID)),
-  };
-}
-
-/**
- * The `code` method response: the host opens the CLI's authorize URL and the
- * user pastes the code from the Claude page back into the host, which writes
- * it to the CLI's stdin. Success is the CLI's own exit status.
- */
-function relayOrFallback(
-  launch: Awaited<ReturnType<typeof startClaudeCliLogin>>,
-  methodID: string,
-) {
-  if (launch.state === "awaiting-code") {
-    return {
-      url: launch.url,
-      instructions:
-        "Sign in on the Claude page that opened and paste the code it shows here — or sign in from a terminal instead with `claude auth login --claudeai` and start this sign-in again. If the page did not open, use the sign-in link above.",
-      mode: "code" as const,
-      async callback(code: string) {
-        const submitted = await submitClaudeCliLoginCode(code);
-        if (submitted.ok) return cliSignInMarker(methodID);
-        log.warn("[opencode-claude] Claude CLI login code rejected", {
-          message: submitted.message,
-        });
-        // The CLI can store its grant and still exit oddly; trust its own
-        // auth status over the exit code before failing.
-        const verified = await detectClaudeCode();
-        if (verified.loggedIn) return cliSignInMarker(methodID);
-        throw new Error(
-          submitted.message || "Claude Code CLI did not accept the sign-in code.",
-        );
-      },
-    };
-  }
-
-  log.warn("[opencode-claude] Claude CLI login launch failed", {
-    message: launch.message,
-  });
-  return manualInstallResponse(launch.message, methodID);
-}
-
-/**
- * No page to open: the user installs and signs in from a terminal (or via the
- * install action), and the callback watches `claude auth status` until the
- * grant lands. The message always names both the install and the auth command.
- */
-export function manualInstallResponse(launchMessage: string, methodID: string) {
-  return {
-    url: "",
-    instructions: `${launchMessage}
-Install Claude Code, sign in, then click Complete:
-
-  npm install -g @anthropic-ai/claude-code
-  claude auth login --claudeai
-
-Or use the “Install Claude Code CLI and sign in” action here instead.`,
-    mode: "auto" as const,
-    // v2 hands the host a promise, not a function: polling starts now.
-    get callback() {
-      return waitForCliLogin(methodID);
-    },
-  };
-}
-
-async function waitForCliLogin(methodID: string) {
-  const deadline = Date.now() + 10 * 60_000;
-  while (Date.now() < deadline) {
-    const detection = await detectClaudeCode();
-    if (detection.loggedIn) return cliSignInMarker(methodID);
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-  log.warn("[opencode-claude] Claude CLI login timed out");
-  throw new Error("Timed out waiting for `claude auth login` to finish.");
-}
 
 export default ClaudeCodePlugin;
 

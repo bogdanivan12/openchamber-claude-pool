@@ -1,4 +1,6 @@
-export const PROVIDER_ID = "claude-code";
+export const POOL_PROVIDER_ID = "claude-pool";
+/** Which Claude Pool account a request uses: "pool" or a 6-hex account id. */
+export const ACCOUNT_HEADER = "x-claude-pool-account";
 export const DEFAULT_MODEL_ID = "sonnet";
 export const OPENAI_COMPATIBLE_PACKAGE = "@opencode/ai/providers/openai-compatible";
 
