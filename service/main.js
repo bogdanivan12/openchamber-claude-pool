@@ -66,196 +66,199 @@ function createServer(routes, token) {
     });
   });
 }
-// node_modules/@openchamber/sdk/dist/scrollbar-style.js
-var GUEST_SCROLLING_ATTRIBUTE = "data-oc-scrolling";
-var GUEST_SCROLLBAR_CSS = `
-:root {
-  /* Quiet at rest like the app's own thumbs; hover gives a clear grab target. */
-  --oc-scrollbar-thumb: color-mix(in srgb, var(--oc-muted, currentColor) 18%, transparent);
-  --oc-scrollbar-thumb-hover: color-mix(in srgb, var(--oc-muted, currentColor) 36%, transparent);
-  scrollbar-gutter: stable;
-}
-* {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-:hover, [${GUEST_SCROLLING_ATTRIBUTE}] {
-  scrollbar-color: var(--oc-scrollbar-thumb) transparent;
-}
-/* Chromium's standard scrollbar properties otherwise override its pseudo-elements. */
-@supports selector(::-webkit-scrollbar) {
-  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-width: auto; scrollbar-color: auto; }
-  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-    min-width: 24px;
-    min-height: 24px;
-  }
-  :hover::-webkit-scrollbar-thumb, [${GUEST_SCROLLING_ATTRIBUTE}]::-webkit-scrollbar-thumb { background: var(--oc-scrollbar-thumb); }
-  ::-webkit-scrollbar-thumb:hover { background: var(--oc-scrollbar-thumb-hover); }
-  ::-webkit-scrollbar-corner { background: transparent; }
-  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
-}
-@media (forced-colors: active) {
-  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-color: auto; }
-  ::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: CanvasText; }
-}
-`;
-function installGuestScrollbarActivity(doc) {
-  const root = doc.documentElement;
-  if (root.hasAttribute("data-oc-scrollbar-activity"))
-    return;
-  root.setAttribute("data-oc-scrollbar-activity", "");
-  const timers = new WeakMap;
-  doc.addEventListener("scroll", (event) => {
-    const target = event.target === doc ? root : event.target;
-    if (!(target instanceof Element))
-      return;
-    if (!target.hasAttribute("data-oc-scrolling"))
-      target.setAttribute("data-oc-scrolling", "");
-    const pending = timers.get(target);
-    if (pending !== undefined)
-      clearTimeout(pending);
-    timers.set(target, setTimeout(() => {
-      timers.delete(target);
-      target.removeAttribute("data-oc-scrolling");
-    }, 1000));
-  }, { capture: true, passive: true });
-}
-var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
-// node_modules/@openchamber/sdk/dist/manifest.js
-var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
-var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
-var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
-// node_modules/@openchamber/sdk/dist/session-events.js
-var GUEST_SESSION_EVENT_TYPES = [
-  "turn-finished",
-  "turn-failed",
-  "permission-asked",
-  "question-asked",
-  "turn-started",
-  "session-created",
-  "session-archived",
-  "session-deleted"
-];
-var SESSION_EVENTS_IDLE_MS = 10 * 60000;
-var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
-// node_modules/@openchamber/sdk/dist/service-host.js
-var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
-var MENTIONS_IDLE_MS = 10 * 60000;
-// node_modules/@openchamber/sdk/dist/file-editor.js
-var patternExpressions = new Map;
-// node_modules/@openchamber/sdk/dist/contract.js
-var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
-var GUEST_GENERATE_LATE_KEEP_MS = 60 * 60000;
-var HOST_REQUEST_ERROR_CODES = [
-  "HOST_UNAVAILABLE",
-  "HOST_TIMEOUT",
-  "HOST_REJECTED",
-  "DISCONNECTED",
-  "DISABLED",
-  "BAD_PATH",
-  "NO_INTEGRATION",
-  "NO_SERVICE",
-  "SERVICE_FAILED",
-  "REQUEST_FAILED",
-  "RESPONSE_TOO_LARGE",
-  "NO_SESSION",
-  "SESSION_BUSY",
-  "NOT_GRANTED",
-  "NO_DIRECTORY",
-  "NOT_FOUND",
-  "FILE_TOO_LARGE",
-  "DENIED",
-  "NO_MODEL",
-  "MODEL_FAILED",
-  "UNSUPPORTED"
-];
-var SERVICE_STATUS_VALUES = ["stopped", "starting", "ready", "failed"];
-var hostRequestErrorCodeSet = new Set(HOST_REQUEST_ERROR_CODES);
-var serviceStatusSet = new Set(SERVICE_STATUS_VALUES);
-var fileStatKindSet = new Set(GUEST_FILE_STAT_KINDS);
-var HOST_PUSH_TYPES = new Set([
-  "workspace",
-  "shells",
-  "ready",
-  "directory",
-  "session",
-  "connection",
-  "settings",
-  "session-lifecycle",
-  "item",
-  "resolve",
-  "action",
-  "service-event",
-  "status-control-event",
-  "popover-closed",
-  "file-open",
-  "file-snapshot",
-  "file-saved",
-  "generate-late",
-  "microphone-audio",
-  "microphone-ended"
+
+// service/src/accounts-api.ts
+import { existsSync as existsSync3, rmSync } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+
+// plugin/src/executable-path.ts
+import { spawn } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
+// plugin/src/auth-env.ts
+var AUTH_OVERRIDE_ENV_KEYS = Object.freeze([
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN"
 ]);
-// node_modules/@openchamber/sdk/dist/service-providers.js
-var BROWSER_CONTROL_ACTIONS = [
-  "browser.open",
-  "browser.snapshot",
-  "browser.click",
-  "browser.type",
-  "browser.select",
-  "browser.scroll",
-  "browser.back",
-  "browser.forward",
-  "browser.inspect",
-  "browser.capture",
-  "browser.resize",
-  "browser.close"
-];
-var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
-var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
-var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
-var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
-var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
-var QUOTA_PROVIDER_WIRE_VERSION = 1;
-var QUOTA_PROVIDER_METHODS = ["usage.read"];
-var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
-var isQuotaProviderMethod = (value) => QUOTA_PROVIDER_METHODS.some((method) => method === value);
-var readQuotaProviderRequest = (body) => {
-  let wire;
-  try {
-    const parsed = JSON.parse(body);
-    if (Object(parsed) !== parsed || parsed === null)
-      return null;
-    wire = parsed;
-  } catch {
-    return null;
+var MCP_DESCRIPTION_LIMIT = 8192;
+function buildClaudeCodeChildEnv(baseEnv = process.env) {
+  const env = { ...baseEnv };
+  for (const key of AUTH_OVERRIDE_ENV_KEYS) {
+    delete env[key];
   }
-  const { v, requestId, method, provider, input } = wire;
-  if (v !== QUOTA_PROVIDER_WIRE_VERSION)
+  if (!env.CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH?.trim()) {
+    env.CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH = String(MCP_DESCRIPTION_LIMIT);
+  }
+  return env;
+}
+
+// plugin/src/executable-path.ts
+var MAX_PROBE_OUTPUT = 64 * 1024;
+function isJsEntrypoint(path) {
+  return /\.[cm]?js$/i.test(path);
+}
+function cliInvocation(binaryPath, args) {
+  return isJsEntrypoint(binaryPath) ? ["node", [binaryPath, ...args]] : [binaryPath, args];
+}
+function runCliProbe(command, args, options) {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let settled = false;
+    let child;
+    const finish = (status, failed) => {
+      if (settled)
+        return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status, stdout, failed });
+    };
+    const timer = setTimeout(() => {
+      child?.kill("SIGKILL");
+      finish(null, true);
+    }, options.timeoutMs);
+    timer.unref?.();
+    try {
+      const [file, argv] = cliInvocation(command, args);
+      child = spawn(file, argv, {
+        env: options.env,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"]
+      });
+    } catch {
+      finish(null, true);
+      return;
+    }
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => {
+      if (stdout.length < MAX_PROBE_OUTPUT)
+        stdout += chunk;
+    });
+    child.once("error", () => finish(null, true));
+    child.once("close", (code) => finish(code, false));
+  });
+}
+async function isExecutableFile(candidate) {
+  try {
+    await access(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function probeClaude(candidate, env) {
+  const result = await runCliProbe(candidate, ["--version"], {
+    env: buildClaudeCodeChildEnv(env),
+    timeoutMs: 4000
+  });
+  if (result.failed)
+    return false;
+  return result.status === 0 || Boolean(result.stdout.trim());
+}
+async function probeClaudePath(candidate, env) {
+  return await isExecutableFile(candidate) && await probeClaude(candidate, env);
+}
+async function resolveWindowsClaudePath(candidate) {
+  if (!await isExecutableFile(candidate))
     return null;
-  if (String(requestId) !== requestId || requestId.length === 0)
+  if (/\.exe$/i.test(candidate))
+    return candidate;
+  if (!/\.(cmd|bat)$/i.test(candidate))
     return null;
-  if (String(provider) !== provider || provider.length === 0)
+  const pkg = join(dirname(candidate), "node_modules", "@anthropic-ai", "claude-code");
+  for (const target of [join(pkg, "bin", "claude.exe"), join(pkg, "cli.js")]) {
+    if (await isExecutableFile(target))
+      return target;
+  }
+  return null;
+}
+async function usableClaudePath(candidate, env) {
+  if (process.platform === "win32")
+    return resolveWindowsClaudePath(candidate);
+  return await probeClaudePath(candidate, env) ? candidate : null;
+}
+async function knownClaudeLocations(env) {
+  const home = typeof env.HOME === "string" && env.HOME ? env.HOME : homedir();
+  if (process.platform === "win32") {
+    const appData = typeof env.APPDATA === "string" && env.APPDATA ? env.APPDATA : join(home, "AppData", "Roaming");
+    return [
+      join(home, ".local", "bin", "claude.exe"),
+      join(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+      join(appData, "npm", "claude.cmd")
+    ];
+  }
+  const candidates = [join(home, ".local", "bin", "claude")];
+  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
+  const dir = prefix.failed ? "" : prefix.stdout.trim();
+  if (dir)
+    candidates.push(join(dir, "bin", "claude"));
+  return candidates;
+}
+async function findBinaryOnPath(name, env = process.env) {
+  const pathEnv = typeof env.PATH === "string" ? env.PATH : "";
+  const parts = pathEnv.split(process.platform === "win32" ? ";" : ":");
+  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat"] : [""];
+  for (const dir of parts) {
+    if (!dir)
+      continue;
+    for (const ext of exts) {
+      const candidate = `${dir.replace(/[/\\]$/, "")}/${name}${ext}`;
+      const usable = await usableClaudePath(candidate, env);
+      if (usable)
+        return usable;
+    }
+  }
+  if (process.platform === "win32")
     return null;
-  if (String(method) !== method || !isQuotaProviderMethod(method))
-    return null;
-  if (Object(input) !== input || input === null || input === undefined || Array.isArray(input))
-    return null;
-  const { credentials } = input;
-  if (Object(credentials) !== credentials || credentials === null || Array.isArray(credentials))
-    return null;
-  if (Object.values(Object(credentials)).some((credential) => Object(credential) !== credential || credential === null || Array.isArray(credential)))
-    return null;
-  return { v: QUOTA_PROVIDER_WIRE_VERSION, requestId, method, provider, input: { credentials } };
-};
-// node_modules/@openchamber/sdk/dist/service-surface.js
-var SURFACE_CONTROLLERS = ["none", "agent", "user"];
-var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
+  return await probeClaude(name, env) ? name : null;
+}
+var MISS_CACHE_MS = 60000;
+var cachedResolution = null;
+var inflight = null;
+function resolveClaudeCli(env = process.env) {
+  const key = `${env.PATH ?? ""}\x00${env.HOME ?? ""}`;
+  if (cachedResolution && cachedResolution.key === key && Date.now() < cachedResolution.expiresAt) {
+    return Promise.resolve(cachedResolution.path);
+  }
+  if (inflight && inflight.key === key)
+    return inflight.promise;
+  const promise = probeClaudeCli(env).then((path) => {
+    if (inflight?.promise === promise) {
+      inflight = null;
+      cachedResolution = {
+        key,
+        path,
+        expiresAt: path ? Number.POSITIVE_INFINITY : Date.now() + MISS_CACHE_MS
+      };
+    }
+    return path;
+  }, (error) => {
+    if (inflight?.promise === promise)
+      inflight = null;
+    throw error;
+  });
+  inflight = { key, promise };
+  return promise;
+}
+async function probeClaudeCli(env) {
+  let resolved = await findBinaryOnPath("claude", env);
+  if (!resolved) {
+    for (const candidate of await knownClaudeLocations(env)) {
+      resolved = await usableClaudePath(candidate, env);
+      if (resolved)
+        break;
+    }
+  }
+  return resolved;
+}
+
 // shared/accounts.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
 import { existsSync as existsSync2, renameSync as renameSync2 } from "node:fs";
+import { isAbsolute as isAbsolute2 } from "node:path";
 
 // node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -6051,39 +6054,43 @@ function superRefine(fn, params) {
 }
 // shared/paths.ts
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
-import { join, parse as parse3, relative, resolve, sep, isAbsolute } from "node:path";
-function poolDataDir(home = homedir()) {
+import { homedir as homedir2 } from "node:os";
+import { join as join2, parse as parse3, relative, resolve, sep, isAbsolute } from "node:path";
+function poolDataDir(home = homedir2()) {
   const override = process.env.CLAUDE_POOL_HOME?.trim();
-  return override ? resolve(override) : join(home, ".claude-pool");
+  return override ? resolve(override) : join2(home, ".claude-pool");
 }
-var accountsFile = (dataDir = poolDataDir()) => join(dataDir, "accounts.json");
-var stateFile = (dataDir = poolDataDir()) => join(dataDir, "state.json");
-var lockFile = (dataDir = poolDataDir()) => join(dataDir, "state.lock");
-var defaultConfigDir = (home = homedir()) => join(home, ".claude");
-function normalizeDir(p, home = homedir()) {
+var accountsFile = (dataDir = poolDataDir()) => join2(dataDir, "accounts.json");
+var stateFile = (dataDir = poolDataDir()) => join2(dataDir, "state.json");
+var lockFile = (dataDir = poolDataDir()) => join2(dataDir, "state.lock");
+var defaultConfigDir = (home = homedir2()) => join2(home, ".claude");
+function normalizeDir(p, home = homedir2()) {
   let value = p.trim();
   if (value === "~")
     value = home;
   else if (value.startsWith("~/") || value.startsWith("~\\"))
-    value = join(home, value.slice(2));
+    value = join2(home, value.slice(2));
   let out = resolve(value);
   const root = parse3(out).root;
   while (out.length > root.length && (out.endsWith(sep) || out.endsWith("/")))
     out = out.slice(0, -1);
   return out;
 }
-var isDefaultConfigDir = (dir, home = homedir()) => normalizeDir(dir, home) === defaultConfigDir(home);
-function keychainService(configDir, home = homedir()) {
+var isDefaultConfigDir = (dir, home = homedir2()) => normalizeDir(dir, home) === defaultConfigDir(home);
+function keychainService(configDir, home = homedir2()) {
   if (isDefaultConfigDir(configDir, home))
     return "Claude Code-credentials";
   const hash = createHash("sha256").update(normalizeDir(configDir, home)).digest("hex").slice(0, 8);
   return `Claude Code-credentials-${hash}`;
 }
+function isInsidePoolAccounts(dir, dataDir = poolDataDir()) {
+  const rel = relative(join2(dataDir, "accounts"), normalizeDir(dir));
+  return rel !== "" && !(rel === ".." || rel.startsWith(".." + sep)) && !isAbsolute(rel) && !rel.includes(sep);
+}
 
 // shared/store-io.ts
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname as dirname2 } from "node:path";
 import { randomBytes } from "node:crypto";
 var sab = new Int32Array(new SharedArrayBuffer(4));
 function sleepSync(ms) {
@@ -6101,7 +6108,7 @@ function readJsonFile(path) {
   return JSON.parse(text);
 }
 function writeJsonAtomic(path, value) {
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname2(path), { recursive: true });
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2) + `
 `, { mode: 384 });
@@ -6125,7 +6132,7 @@ function withLock(lockPath, fn, opts = {}) {
   const staleMs = opts.staleMs ?? 1e4;
   const deadline = Date.now() + (opts.timeoutMs ?? 5000);
   const token = `${process.pid}:${randomBytes(8).toString("hex")}`;
-  mkdirSync(dirname(lockPath), { recursive: true });
+  mkdirSync(dirname2(lockPath), { recursive: true });
   for (;; ) {
     try {
       const fd = openSync(lockPath, "wx");
@@ -6259,7 +6266,124 @@ function readAccounts(dataDir = poolDataDir()) {
     return emptyAccounts();
   }
 }
+function checkConfigDirs(file) {
+  for (const a of file.accounts) {
+    const dir = a.configDir.trim();
+    if (!dir)
+      throw new Error("configDir must not be empty");
+    const homeRelative = dir === "~" || dir.startsWith("~/") || dir.startsWith("~\\");
+    if (!homeRelative && !isAbsolute2(dir))
+      throw new Error(`configDir must be absolute: ${a.configDir}`);
+  }
+}
+function updateAccounts(mutate, dataDir = poolDataDir()) {
+  return withLock(lockFile(dataDir), () => {
+    const file = loadLocked(accountsFile(dataDir));
+    mutate(file);
+    checkConfigDirs(file);
+    for (const a of file.accounts)
+      a.configDir = normalizeDir(a.configDir);
+    if (new Set(file.accounts.map((a) => a.configDir)).size !== file.accounts.length) {
+      throw new Error("duplicate configDir");
+    }
+    const valid = parse4(file);
+    writeJsonAtomic(accountsFile(dataDir), valid);
+    return valid;
+  });
+}
+function newAccountId(taken) {
+  const used = new Set(taken);
+  for (;; ) {
+    const id = randomBytes2(3).toString("hex");
+    if (!used.has(id))
+      return id;
+  }
+}
 var enabledAccounts = (file) => file.accounts.filter((a) => a.enabled).sort((a, b) => a.order - b.order);
+
+// shared/creds.ts
+import { execFile } from "node:child_process";
+import { readFileSync as readFileSync2 } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join3 } from "node:path";
+var defaultExec = (file, args) => new Promise((resolve, reject) => {
+  execFile(file, args, { timeout: 1e4, encoding: "utf8", windowsHide: true }, (err, stdout) => err ? reject(err) : resolve(stdout));
+});
+function parseCredentialBlob(raw) {
+  try {
+    const oauth = JSON.parse(raw.trim())?.claudeAiOauth;
+    if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken)
+      return null;
+    return {
+      accessToken: oauth.accessToken,
+      expiresAt: typeof oauth.expiresAt === "number" ? oauth.expiresAt : null,
+      subscriptionType: typeof oauth.subscriptionType === "string" ? oauth.subscriptionType : null
+    };
+  } catch {
+    return null;
+  }
+}
+async function readCredential(configDir, deps = {}) {
+  const platform = deps.platform ?? process.platform;
+  const home = deps.home ?? homedir3();
+  const exec = deps.exec ?? defaultExec;
+  const readFile = deps.readFile ?? ((p) => readFileSync2(p, "utf8"));
+  const dir = platform === "win32" ? configDir : normalizeDir(configDir, home);
+  if (platform === "darwin") {
+    try {
+      const cred = parseCredentialBlob(await exec("security", ["find-generic-password", "-s", keychainService(dir, home), "-w"]));
+      if (cred)
+        return cred;
+    } catch {}
+  }
+  try {
+    return parseCredentialBlob(readFile(join3(dir, ".credentials.json")));
+  } catch {
+    return null;
+  }
+}
+
+// shared/router.ts
+var liveWindows = (st, now) => Object.values(st?.windows ?? {}).filter((w) => !!w && (w.resetsAt === null || w.resetsAt > now));
+function isAvailable(account, st, threshold, now) {
+  if (!account.enabled || st?.needsLogin)
+    return false;
+  if (st?.limitedUntil != null && st.limitedUntil > now)
+    return false;
+  return liveWindows(st, now).every((w) => w.usedPercent < threshold);
+}
+function headroom(st, threshold, now) {
+  return Math.min(threshold, ...liveWindows(st, now).map((w) => threshold - w.usedPercent));
+}
+function nextAvailableAt(account, st, threshold, now) {
+  if (!account.enabled || st?.needsLogin)
+    return null;
+  let at = now;
+  if (st?.limitedUntil != null && st.limitedUntil > at)
+    at = st.limitedUntil;
+  for (const w of liveWindows(st, now)) {
+    if (w.usedPercent < threshold)
+      continue;
+    if (w.resetsAt === null)
+      return null;
+    at = Math.max(at, w.resetsAt);
+  }
+  return at;
+}
+function route(input) {
+  const { accounts, state, threshold, now, current, exclude } = input;
+  const candidates = accounts.filter((a) => !exclude?.has(a.id));
+  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], threshold, now));
+  const sticky = current ? available.find((a) => a.id === current) : undefined;
+  if (sticky)
+    return { kind: "account", account: sticky };
+  if (available.length > 0) {
+    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], threshold, now) - headroom(state.accounts[a.id], threshold, now) || a.order - b.order)[0];
+    return { kind: "account", account: best };
+  }
+  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], threshold, now)).filter((t) => t !== null);
+  return { kind: "none", retryAt: times.length ? Math.min(...times) : null };
+}
 
 // shared/state.ts
 var CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -6316,48 +6440,416 @@ function clampPercent(p) {
   return Math.min(100, Math.max(0, round1(p)));
 }
 
-// shared/router.ts
-var liveWindows = (st, now) => Object.values(st?.windows ?? {}).filter((w) => !!w && (w.resetsAt === null || w.resetsAt > now));
-function isAvailable(account, st, threshold, now) {
-  if (!account.enabled || st?.needsLogin)
-    return false;
-  if (st?.limitedUntil != null && st.limitedUntil > now)
-    return false;
-  return liveWindows(st, now).every((w) => w.usedPercent < threshold);
+// service/src/auth-status.ts
+var SIGNED_OUT = { loggedIn: false, email: null, plan: null };
+function envForDir(configDir) {
+  const env = { ...buildClaudeCodeChildEnv(process.env) };
+  if (isDefaultConfigDir(configDir))
+    delete env.CLAUDE_CONFIG_DIR;
+  else
+    env.CLAUDE_CONFIG_DIR = configDir;
+  return env;
 }
-function headroom(st, threshold, now) {
-  return Math.min(threshold, ...liveWindows(st, now).map((w) => threshold - w.usedPercent));
-}
-function nextAvailableAt(account, st, threshold, now) {
-  if (!account.enabled || st?.needsLogin)
+async function defaultRun(configDir) {
+  const env = envForDir(configDir);
+  const bin = await resolveClaudeCli(env);
+  if (!bin)
     return null;
-  let at = now;
-  if (st?.limitedUntil != null && st.limitedUntil > at)
-    at = st.limitedUntil;
-  for (const w of liveWindows(st, now)) {
-    if (w.usedPercent < threshold)
-      continue;
-    if (w.resetsAt === null)
-      return null;
-    at = Math.max(at, w.resetsAt);
-  }
-  return at;
+  const result = await runCliProbe(bin, ["auth", "status", "--json"], { env, timeoutMs: 8000 });
+  return result.stdout.trim() || null;
 }
-function route(input) {
-  const { accounts, state, threshold, now, current, exclude } = input;
-  const candidates = accounts.filter((a) => !exclude?.has(a.id));
-  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], threshold, now));
-  const sticky = current ? available.find((a) => a.id === current) : undefined;
-  if (sticky)
-    return { kind: "account", account: sticky };
-  if (available.length > 0) {
-    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], threshold, now) - headroom(state.accounts[a.id], threshold, now) || a.order - b.order)[0];
-    return { kind: "account", account: best };
+async function readAuthStatus(configDir, deps = {}) {
+  let out;
+  try {
+    out = await (deps.run ?? defaultRun)(configDir);
+  } catch {
+    return { ...SIGNED_OUT };
   }
-  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], threshold, now)).filter((t) => t !== null);
-  return { kind: "none", retryAt: times.length ? Math.min(...times) : null };
+  if (!out)
+    return { ...SIGNED_OUT };
+  try {
+    const j = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1));
+    return {
+      loggedIn: j.loggedIn === true,
+      email: typeof j.email === "string" ? j.email : null,
+      plan: typeof j.subscriptionType === "string" ? j.subscriptionType : null
+    };
+  } catch {
+    return { ...SIGNED_OUT };
+  }
+}
+async function logoutDir(dir) {
+  try {
+    const env = envForDir(dir);
+    const bin = await resolveClaudeCli(env);
+    if (!bin)
+      return;
+    await runCliProbe(bin, ["auth", "logout"], { env, timeoutMs: 8000 });
+  } catch {}
 }
 
+// service/src/import.ts
+import { readdirSync, statSync as statSync2 } from "node:fs";
+import { join as join4 } from "node:path";
+async function findImportCandidates(deps) {
+  const list = deps.listHome ?? (() => {
+    try {
+      return readdirSync(deps.home).filter((n) => {
+        try {
+          return statSync2(join4(deps.home, n)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return [];
+    }
+  });
+  const names = list().filter((n) => n === ".claude" || n.startsWith(".claude-") && n !== ".claude-pool");
+  const taken = new Set(deps.existing.map((d) => normalizeDir(d, deps.home)));
+  const out = [];
+  for (const n of names.sort((a, b) => a === ".claude" ? -1 : b === ".claude" ? 1 : a.localeCompare(b))) {
+    const dir = join4(deps.home, n);
+    if (taken.has(normalizeDir(dir, deps.home)))
+      continue;
+    if (await deps.hasCredential(dir))
+      out.push(dir);
+  }
+  return out;
+}
+
+// service/src/accounts-api.ts
+var MAX_LABEL = 40;
+var NAME_TAKEN = "Another account already uses this name";
+var json = (r) => r.body ? JSON.parse(r.body) : {};
+var bad = (message) => ({ status: 400, body: { error: message } });
+var sameLabel = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+function uniqueLabel(base, taken) {
+  const start = base.trim().slice(0, MAX_LABEL).trim();
+  let label = start;
+  for (let n = 2;taken.some((t) => sameLabel(t, label)); n++) {
+    const suffix = ` ${n}`;
+    label = start.slice(0, MAX_LABEL - suffix.length).trimEnd() + suffix;
+  }
+  return label;
+}
+function accountRoutes(deps = {}) {
+  const cliFound = deps.cliFound ?? (async () => await resolveClaudeCli(process.env) !== null);
+  const dataDir = deps.dataDir ?? poolDataDir();
+  const home = deps.home ?? homedir4();
+  const authStatus = deps.authStatus ?? readAuthStatus;
+  const hasCredential = deps.hasCredential ?? (async (dir) => await readCredential(dir) !== null);
+  const logout = deps.logout ?? logoutDir;
+  return {
+    "GET /api/accounts": async () => {
+      const found = await cliFound();
+      const file = readAccounts(dataDir);
+      const state = readState(dataDir);
+      const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
+      const active = choice.kind === "account" ? choice.account.id : null;
+      return {
+        status: 200,
+        body: {
+          threshold: file.threshold,
+          cliFound: found,
+          recoveredBackup: existsSync3(`${accountsFile(dataDir)}.bak`),
+          accounts: [...file.accounts].sort((a, b) => a.order - b.order).map((a) => ({
+            ...a,
+            state: state.accounts[a.id] ?? null,
+            poolActive: a.id === active,
+            canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir)
+          }))
+        }
+      };
+    },
+    "GET /api/import-candidates": async () => ({
+      status: 200,
+      body: { candidates: await findImportCandidates({ home, existing: readAccounts(dataDir).accounts.map((a) => a.configDir), hasCredential }) }
+    }),
+    "POST /api/import": async (r) => {
+      const dirs = json(r).configDirs;
+      if (!Array.isArray(dirs) || !dirs.every((d) => typeof d === "string"))
+        return bad("configDirs must be a list of folders");
+      const added = [];
+      const skipped = [];
+      for (const raw of dirs) {
+        if (!raw.trim())
+          return bad("configDirs must not contain empty folders");
+        const dir = normalizeDir(raw, home);
+        if (readAccounts(dataDir).accounts.some((a) => normalizeDir(a.configDir, home) === dir)) {
+          skipped.push({ configDir: dir, reason: "already in the pool" });
+          continue;
+        }
+        const info = await authStatus(dir);
+        if (!info.loggedIn) {
+          skipped.push({ configDir: dir, reason: "not signed in to a Claude subscription" });
+          continue;
+        }
+        const next = updateAccounts((f) => {
+          const id = newAccountId(f.accounts.map((a) => a.id));
+          const base = info.email?.split("@")[0] || `account ${f.accounts.length + 1}`;
+          const label = uniqueLabel(base, f.accounts.map((a) => a.label));
+          f.accounts.push({ id, label, configDir: dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
+        }, dataDir);
+        added.push(next.accounts.at(-1));
+      }
+      return { status: 200, body: { added, skipped } };
+    },
+    "PATCH /api/accounts/:id": (r) => {
+      const id = r.query.get("id");
+      const patch = json(r);
+      const label = typeof patch.label === "string" ? patch.label.trim() : undefined;
+      if (label !== undefined && (label.length < 1 || label.length > MAX_LABEL))
+        return bad(`Name must be 1 to ${MAX_LABEL} characters`);
+      let found;
+      try {
+        updateAccounts((f) => {
+          found = f.accounts.find((a) => a.id === id);
+          if (!found)
+            return;
+          if (label !== undefined) {
+            if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label)))
+              throw new Error(NAME_TAKEN);
+            found.label = label;
+          }
+          if (typeof patch.enabled === "boolean")
+            found.enabled = patch.enabled;
+        }, dataDir);
+      } catch (err) {
+        return bad(err instanceof Error ? err.message : "invalid change");
+      }
+      return found ? { status: 200, body: found } : { status: 404, body: { error: "no such account" } };
+    },
+    "POST /api/accounts/reorder": (r) => {
+      const ids = json(r).ids;
+      if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string"))
+        return bad("ids must be a list of account ids");
+      updateAccounts((f) => {
+        const rank = new Map(ids.map((id, i) => [id, i]));
+        f.accounts.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || a.order - b.order);
+        f.accounts.forEach((a, i) => a.order = i);
+      }, dataDir);
+      return { status: 200, body: { ok: true } };
+    },
+    "DELETE /api/accounts/:id": async (r) => {
+      const id = r.query.get("id");
+      let removed;
+      updateAccounts((f) => {
+        removed = f.accounts.find((a) => a.id === id);
+        f.accounts = f.accounts.filter((a) => a.id !== id);
+        f.accounts.forEach((a, i) => a.order = i);
+      }, dataDir);
+      if (!removed)
+        return { status: 404, body: { error: "no such account" } };
+      let deletedLogin = false;
+      if (r.query.get("deleteLogin") === "1" && isInsidePoolAccounts(removed.configDir, dataDir)) {
+        try {
+          await logout(removed.configDir);
+        } catch {}
+        rmSync(removed.configDir, { recursive: true, force: true });
+        deletedLogin = true;
+      }
+      return { status: 200, body: { ok: true, deletedLogin } };
+    },
+    "PUT /api/settings": (r) => {
+      const t = json(r).threshold;
+      if (typeof t !== "number" || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD)
+        return bad(`threshold must be ${MIN_THRESHOLD}..${MAX_THRESHOLD}`);
+      const f = updateAccounts((file) => {
+        file.threshold = t;
+      }, dataDir);
+      return { status: 200, body: { threshold: f.threshold } };
+    }
+  };
+}
+// node_modules/@openchamber/sdk/dist/scrollbar-style.js
+var GUEST_SCROLLING_ATTRIBUTE = "data-oc-scrolling";
+var GUEST_SCROLLBAR_CSS = `
+:root {
+  /* Quiet at rest like the app's own thumbs; hover gives a clear grab target. */
+  --oc-scrollbar-thumb: color-mix(in srgb, var(--oc-muted, currentColor) 18%, transparent);
+  --oc-scrollbar-thumb-hover: color-mix(in srgb, var(--oc-muted, currentColor) 36%, transparent);
+  scrollbar-gutter: stable;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+:hover, [${GUEST_SCROLLING_ATTRIBUTE}] {
+  scrollbar-color: var(--oc-scrollbar-thumb) transparent;
+}
+/* Chromium's standard scrollbar properties otherwise override its pseudo-elements. */
+@supports selector(::-webkit-scrollbar) {
+  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-width: auto; scrollbar-color: auto; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 999px;
+    min-width: 24px;
+    min-height: 24px;
+  }
+  :hover::-webkit-scrollbar-thumb, [${GUEST_SCROLLING_ATTRIBUTE}]::-webkit-scrollbar-thumb { background: var(--oc-scrollbar-thumb); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--oc-scrollbar-thumb-hover); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+}
+@media (forced-colors: active) {
+  *, :hover, [${GUEST_SCROLLING_ATTRIBUTE}] { scrollbar-color: auto; }
+  ::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb:hover { background: CanvasText; }
+}
+`;
+function installGuestScrollbarActivity(doc) {
+  const root = doc.documentElement;
+  if (root.hasAttribute("data-oc-scrollbar-activity"))
+    return;
+  root.setAttribute("data-oc-scrollbar-activity", "");
+  const timers = new WeakMap;
+  doc.addEventListener("scroll", (event) => {
+    const target = event.target === doc ? root : event.target;
+    if (!(target instanceof Element))
+      return;
+    if (!target.hasAttribute("data-oc-scrolling"))
+      target.setAttribute("data-oc-scrolling", "");
+    const pending = timers.get(target);
+    if (pending !== undefined)
+      clearTimeout(pending);
+    timers.set(target, setTimeout(() => {
+      timers.delete(target);
+      target.removeAttribute("data-oc-scrolling");
+    }, 1000));
+  }, { capture: true, passive: true });
+}
+var GUEST_SCROLLBAR_SCRIPT = `(${installGuestScrollbarActivity.toString()})(document);`;
+// node_modules/@openchamber/sdk/dist/manifest.js
+var GUEST_PROVIDER_LOGO_BYTES_MAX = 1024 * 1024;
+var TRACKER_URL_TOKENS = ["{id}", "{segment}", "{segments+}"];
+var TRACKER_URL_TOKEN_SET = new Set(TRACKER_URL_TOKENS);
+// node_modules/@openchamber/sdk/dist/session-events.js
+var GUEST_SESSION_EVENT_TYPES = [
+  "turn-finished",
+  "turn-failed",
+  "permission-asked",
+  "question-asked",
+  "turn-started",
+  "session-created",
+  "session-archived",
+  "session-deleted"
+];
+var SESSION_EVENTS_IDLE_MS = 10 * 60000;
+var EVENT_TYPES = new Set(GUEST_SESSION_EVENT_TYPES);
+// node_modules/@openchamber/sdk/dist/service-host.js
+var SERVICE_SCHEDULE_IDLE_MS = 10 * 60000;
+var MENTIONS_IDLE_MS = 10 * 60000;
+// node_modules/@openchamber/sdk/dist/file-editor.js
+var patternExpressions = new Map;
+// node_modules/@openchamber/sdk/dist/contract.js
+var GUEST_FILE_STAT_KINDS = ["file", "directory", "other", "missing"];
+var GUEST_GENERATE_LATE_KEEP_MS = 60 * 60000;
+var HOST_REQUEST_ERROR_CODES = [
+  "HOST_UNAVAILABLE",
+  "HOST_TIMEOUT",
+  "HOST_REJECTED",
+  "DISCONNECTED",
+  "DISABLED",
+  "BAD_PATH",
+  "NO_INTEGRATION",
+  "NO_SERVICE",
+  "SERVICE_FAILED",
+  "REQUEST_FAILED",
+  "RESPONSE_TOO_LARGE",
+  "NO_SESSION",
+  "SESSION_BUSY",
+  "NOT_GRANTED",
+  "NO_DIRECTORY",
+  "NOT_FOUND",
+  "FILE_TOO_LARGE",
+  "DENIED",
+  "NO_MODEL",
+  "MODEL_FAILED",
+  "UNSUPPORTED"
+];
+var SERVICE_STATUS_VALUES = ["stopped", "starting", "ready", "failed"];
+var hostRequestErrorCodeSet = new Set(HOST_REQUEST_ERROR_CODES);
+var serviceStatusSet = new Set(SERVICE_STATUS_VALUES);
+var fileStatKindSet = new Set(GUEST_FILE_STAT_KINDS);
+var HOST_PUSH_TYPES = new Set([
+  "workspace",
+  "shells",
+  "ready",
+  "directory",
+  "session",
+  "connection",
+  "settings",
+  "session-lifecycle",
+  "item",
+  "resolve",
+  "action",
+  "service-event",
+  "status-control-event",
+  "popover-closed",
+  "file-open",
+  "file-snapshot",
+  "file-saved",
+  "generate-late",
+  "microphone-audio",
+  "microphone-ended"
+]);
+// node_modules/@openchamber/sdk/dist/service-providers.js
+var BROWSER_CONTROL_ACTIONS = [
+  "browser.open",
+  "browser.snapshot",
+  "browser.click",
+  "browser.type",
+  "browser.select",
+  "browser.scroll",
+  "browser.back",
+  "browser.forward",
+  "browser.inspect",
+  "browser.capture",
+  "browser.resize",
+  "browser.close"
+];
+var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
+var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
+var SOURCE_CONTROL_PROVIDER_IDLE_MS = 10 * 60000;
+var NOTIFICATIONS_PROVIDER_IDLE_MS = 10 * 60000;
+var TRACKER_PROVIDER_IDLE_MS = 10 * 60000;
+var QUOTA_PROVIDER_WIRE_VERSION = 1;
+var QUOTA_PROVIDER_METHODS = ["usage.read"];
+var QUOTA_PROVIDER_IDLE_MS = 10 * 60000;
+var isQuotaProviderMethod = (value) => QUOTA_PROVIDER_METHODS.some((method) => method === value);
+var readQuotaProviderRequest = (body) => {
+  let wire;
+  try {
+    const parsed = JSON.parse(body);
+    if (Object(parsed) !== parsed || parsed === null)
+      return null;
+    wire = parsed;
+  } catch {
+    return null;
+  }
+  const { v, requestId, method, provider, input } = wire;
+  if (v !== QUOTA_PROVIDER_WIRE_VERSION)
+    return null;
+  if (String(requestId) !== requestId || requestId.length === 0)
+    return null;
+  if (String(provider) !== provider || provider.length === 0)
+    return null;
+  if (String(method) !== method || !isQuotaProviderMethod(method))
+    return null;
+  if (Object(input) !== input || input === null || input === undefined || Array.isArray(input))
+    return null;
+  const { credentials } = input;
+  if (Object(credentials) !== credentials || credentials === null || Array.isArray(credentials))
+    return null;
+  if (Object.values(Object(credentials)).some((credential) => Object(credential) !== credential || credential === null || Array.isArray(credential)))
+    return null;
+  return { v: QUOTA_PROVIDER_WIRE_VERSION, requestId, method, provider, input: { credentials } };
+};
+// node_modules/@openchamber/sdk/dist/service-surface.js
+var SURFACE_CONTROLLERS = ["none", "agent", "user"];
+var CONTROLLERS = new Set(SURFACE_CONTROLLERS);
 // service/src/quota.ts
 var FIVE_H = 5 * 3600;
 var SEVEN_D = 7 * 24 * 3600;
@@ -6433,48 +6925,6 @@ function buildQuotaAnswer(input) {
     planLabel: planSummary(reads, accounts),
     usage: { windows: windowsOf(state.accounts[top.id], now, top.label), models }
   };
-}
-
-// shared/creds.ts
-import { execFile } from "node:child_process";
-import { readFileSync as readFileSync2 } from "node:fs";
-import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
-var defaultExec = (file, args) => new Promise((resolve, reject) => {
-  execFile(file, args, { timeout: 1e4, encoding: "utf8", windowsHide: true }, (err, stdout) => err ? reject(err) : resolve(stdout));
-});
-function parseCredentialBlob(raw) {
-  try {
-    const oauth = JSON.parse(raw.trim())?.claudeAiOauth;
-    if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken)
-      return null;
-    return {
-      accessToken: oauth.accessToken,
-      expiresAt: typeof oauth.expiresAt === "number" ? oauth.expiresAt : null,
-      subscriptionType: typeof oauth.subscriptionType === "string" ? oauth.subscriptionType : null
-    };
-  } catch {
-    return null;
-  }
-}
-async function readCredential(configDir, deps = {}) {
-  const platform = deps.platform ?? process.platform;
-  const home = deps.home ?? homedir2();
-  const exec = deps.exec ?? defaultExec;
-  const readFile = deps.readFile ?? ((p) => readFileSync2(p, "utf8"));
-  const dir = platform === "win32" ? configDir : normalizeDir(configDir, home);
-  if (platform === "darwin") {
-    try {
-      const cred = parseCredentialBlob(await exec("security", ["find-generic-password", "-s", keychainService(dir, home), "-w"]));
-      if (cred)
-        return cred;
-    } catch {}
-  }
-  try {
-    return parseCredentialBlob(readFile(join2(dir, ".credentials.json")));
-  } catch {
-    return null;
-  }
 }
 
 // service/src/usage.ts
@@ -6596,6 +7046,7 @@ var routes = {
   "GET /health": () => ({ status: 200, body: { ok: true } })
 };
 routes["POST /quota"] = quotaRoute();
+Object.assign(routes, accountRoutes());
 
 // service/src/main.ts
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);
