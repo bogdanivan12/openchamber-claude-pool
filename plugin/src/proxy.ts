@@ -73,6 +73,7 @@ import {
   setForeignSessionId,
 } from "./session-store.js";
 import { log } from "./log.js";
+import { installPoolStateBridge } from "./pool-state-bridge.js";
 import { checkSubscriptionAuth } from "./detect.js";
 import {
   getRateLimitSnapshot,
@@ -322,6 +323,7 @@ async function isProxyHealthyAt(baseUrl: string): Promise<boolean> {
 
 export async function startProxy(): Promise<number> {
   if (server && proxyPort) return proxyPort;
+  installPoolStateBridge();
 
   // Only reuse a sibling listener when the operator pinned a port.
   if (REQUESTED_PROXY_PORT > 0) {

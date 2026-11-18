@@ -79,11 +79,22 @@ function readState(configDir?: string): ClaudeRateLimitState | null {
   }
 }
 
+type RateLimitListener = (configDir: string | undefined, state: ClaudeRateLimitState) => void;
+let rateLimitListener: RateLimitListener | null = null;
+export function setRateLimitListener(fn: RateLimitListener | null): void {
+  rateLimitListener = fn;
+}
+
 function writeState(state: ClaudeRateLimitState, configDir?: string): void {
   try {
     const path = storePath(configDir);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(state, null, 2) + "\n", "utf8");
+    try {
+      rateLimitListener?.(configDir, state);
+    } catch {
+      // the pool bridge must never break the proxy
+    }
   } catch {
     // never let the tracker break the proxy
   }
