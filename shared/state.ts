@@ -49,9 +49,10 @@ export function accountState(s: PoolState, id: string): AccountState {
 }
 
 export function recordWindow(s: PoolState, id: string, name: WindowName, w: WindowState): void {
+  if (!Number.isFinite(w.usedPercent)) return;
   const a = accountState(s, id);
   const prev = a.windows[name];
-  if (!prev || w.updatedAt >= prev.updatedAt) a.windows[name] = w;
+  if (!prev || w.updatedAt >= prev.updatedAt) a.windows[name] = { ...w, usedPercent: clampPercent(w.usedPercent) };
 }
 
 export function markLimited(s: PoolState, id: string, until: number): void {
@@ -71,7 +72,16 @@ export function windowNameFromRateLimitType(t: string | undefined): WindowName |
   return t === "five_hour" || t === "seven_day" ? t : undefined;
 }
 
-export function toPercent(value: number): number {
-  const pct = value <= 1 ? value * 100 : value;
-  return Math.min(100, Math.max(0, Math.round(pct * 10) / 10));
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/** Input is the SDK's 0..1 `utilization`. */
+export function fractionToPercent(f: number): number {
+  if (!Number.isFinite(f)) return f > 0 ? 100 : 0;
+  return Math.min(100, Math.max(0, round1(f * 100)));
+}
+
+/** Input is already on the 0..100 scale. */
+export function clampPercent(p: number): number {
+  if (Number.isNaN(p)) return 0;
+  return Math.min(100, Math.max(0, round1(p)));
 }

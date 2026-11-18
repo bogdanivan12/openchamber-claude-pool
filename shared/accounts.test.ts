@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { describe, expect, it, spyOn } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -67,5 +67,68 @@ describe("accounts", () => {
     expect(findByConfigDir(f, undefined)?.id).toBe("aaaaaa");
     expect(findByConfigDir(f, join(homedir(), ".claude-b") + "/")?.id).toBe("bbbbbb");
     expect(findByConfigDir(f, "/nowhere")).toBeUndefined();
+  });
+
+  it("quarantines corrupt files without overwriting an earlier backup", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const d = dir();
+      writeFileSync(join(d, "accounts.json"), "{bad1");
+      expect(readAccounts(d).accounts).toEqual([]);
+      expect(readFileSync(join(d, "accounts.json.bak"), "utf8")).toBe("{bad1");
+      writeFileSync(join(d, "accounts.json"), "{bad2");
+      expect(readAccounts(d).accounts).toEqual([]);
+      expect(readFileSync(join(d, "accounts.json.bak"), "utf8")).toBe("{bad1");
+      const extra = readdirSync(d).filter((n) => n.startsWith("accounts.json.bak."));
+      expect(extra.length).toBe(1);
+      expect(readFileSync(join(d, extra[0]), "utf8")).toBe("{bad2");
+    } finally { warn.mockRestore(); }
+  });
+
+  it("schema-invalid files count as corrupt", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const d = dir();
+      writeFileSync(join(d, "accounts.json"), JSON.stringify({ version: 2 }));
+      expect(readAccounts(d).accounts).toEqual([]);
+      expect(existsSync(join(d, "accounts.json.bak"))).toBe(true);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("I/O errors are not corruption: file untouched, update throws", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const d = dir();
+      mkdirSync(join(d, "accounts.json"));
+      expect(readAccounts(d).accounts).toEqual([]);
+      expect(() => updateAccounts((f) => { f.threshold = 80; }, d)).toThrow();
+      expect(existsSync(join(d, "accounts.json.bak"))).toBe(false);
+      expect(readdirSync(d).some((n) => n.startsWith("accounts.json.bak"))).toBe(false);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("a valid file is never renamed", () => {
+    const d = dir();
+    updateAccounts((f) => { f.threshold = 80; }, d);
+    expect(readAccounts(d).threshold).toBe(80);
+    expect(readdirSync(d).some((n) => n.includes(".bak"))).toBe(false);
+  });
+
+  it("update rejects empty, relative and duplicate config dirs and writes nothing", () => {
+    const d = dir();
+    for (const configDir of ["", "   ", "relative/dir"]) {
+      expect(() => updateAccounts((f) => {
+        f.accounts.push({ id: "abcdef", label: "x", configDir, order: 0, enabled: true });
+      }, d)).toThrow();
+    }
+    expect(() => updateAccounts((f) => {
+      f.accounts.push({ id: "abcdef", label: "x", configDir: "/x", order: 0, enabled: true });
+      f.accounts.push({ id: "abcdea", label: "y", configDir: "/x/", order: 1, enabled: true });
+    }, d)).toThrow();
+    expect(existsSync(join(d, "accounts.json"))).toBe(false);
+    updateAccounts((f) => {
+      f.accounts.push({ id: "abcdef", label: "x", configDir: "~/.claude-t", order: 0, enabled: true });
+    }, d);
+    expect(readAccounts(d).accounts[0].configDir).toBe(join(homedir(), ".claude-t"));
   });
 });

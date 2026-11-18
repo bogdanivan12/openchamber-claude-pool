@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   CONVERSATION_TTL_MS, bindConversation, emptyState, markLimited, readState, recordWindow,
-  setNeedsLogin, toPercent, updateState, windowNameFromRateLimitType,
+  setNeedsLogin, fractionToPercent, clampPercent, updateState, windowNameFromRateLimitType,
 } from "./state.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "pool-state-"));
@@ -49,8 +49,29 @@ describe("state", () => {
     expect(windowNameFromRateLimitType("five_hour")).toBe("five_hour");
     expect(windowNameFromRateLimitType("seven_day")).toBe("seven_day");
     expect(windowNameFromRateLimitType("seven_day_opus")).toBeUndefined();
-    expect(toPercent(0.42)).toBe(42);
-    expect(toPercent(73)).toBe(73);
-    expect(toPercent(140)).toBe(100);
+  });
+
+  it("fractionToPercent scales the SDK 0..1 utilization", () => {
+    expect(fractionToPercent(0.42)).toBe(42);
+    expect(fractionToPercent(1)).toBe(100);
+    expect(fractionToPercent(0)).toBe(0);
+    expect(fractionToPercent(1.5)).toBe(100);
+  });
+
+  it("clampPercent keeps 0..100 values as they are", () => {
+    expect(clampPercent(1)).toBe(1);
+    expect(clampPercent(0.5)).toBe(0.5);
+    expect(clampPercent(73)).toBe(73);
+    expect(clampPercent(140)).toBe(100);
+    expect(clampPercent(NaN)).toBe(0);
+  });
+
+  it("recordWindow clamps out-of-range and ignores non-finite samples", () => {
+    const s = emptyState();
+    recordWindow(s, "aaaaaa", "five_hour", { usedPercent: 150, resetsAt: 1, updatedAt: 1 });
+    expect(s.accounts.aaaaaa.windows.five_hour?.usedPercent).toBe(100);
+    const t = emptyState();
+    recordWindow(t, "bbbbbb", "five_hour", { usedPercent: NaN, resetsAt: 1, updatedAt: 1 });
+    expect(t.accounts.bbbbbb?.windows.five_hour).toBeUndefined();
   });
 });

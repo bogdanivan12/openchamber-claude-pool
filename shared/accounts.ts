@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { renameSync } from "node:fs";
+import { existsSync, renameSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { accountsFile, defaultConfigDir, lockFile, normalizeDir, poolDataDir } from "./paths.ts";
 import { readJsonFile, withLock, writeJsonAtomic } from "./store-io.ts";
@@ -28,30 +29,89 @@ export type AccountsFile = z.infer<typeof fileSchema>;
 
 export const emptyAccounts = (): AccountsFile => ({ version: 1, accounts: [], threshold: DEFAULT_THRESHOLD });
 
+class CorruptError extends Error {}
+
 function parse(raw: unknown): AccountsFile {
-  const file = fileSchema.parse(raw);
+  const result = fileSchema.safeParse(raw);
+  if (!result.success) throw new CorruptError(result.error.message);
+  const file = result.data;
   const ids = new Set(file.accounts.map((a) => a.id));
-  if (ids.size !== file.accounts.length) throw new Error("duplicate account id");
+  if (ids.size !== file.accounts.length) throw new CorruptError("duplicate account id");
   return file;
+}
+
+/** Reads and validates. Throws CorruptError (bad JSON or schema) or the raw I/O error. */
+function load(path: string): AccountsFile {
+  let raw: unknown;
+  try {
+    raw = readJsonFile(path);
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new CorruptError(err.message);
+    throw err;
+  }
+  return raw === undefined ? emptyAccounts() : parse(raw);
+}
+
+function quarantine(path: string): void {
+  let target = `${path}.bak`;
+  if (existsSync(target)) target = `${path}.bak.${Date.now()}`;
+  try {
+    renameSync(path, target);
+  } catch {}
+}
+
+const warnCorrupt = (err: Error): void =>
+  console.warn("[claude-pool] accounts.json was unreadable and was moved to a .bak file:", err.message);
+
+/** Non-locking loader for callers that already hold the lock: quarantines corrupt files, rethrows I/O errors. */
+function loadLocked(path: string): AccountsFile {
+  try {
+    return load(path);
+  } catch (err) {
+    if (!(err instanceof CorruptError)) throw err;
+    quarantine(path);
+    warnCorrupt(err);
+    return emptyAccounts();
+  }
 }
 
 export function readAccounts(dataDir: string = poolDataDir()): AccountsFile {
   const path = accountsFile(dataDir);
   try {
-    const raw = readJsonFile(path);
-    return raw === undefined ? emptyAccounts() : parse(raw);
+    return load(path);
   } catch (err) {
-    try { renameSync(path, `${path}.bak`); } catch {}
-    console.warn("[claude-pool] accounts.json was unreadable and was moved to accounts.json.bak:", (err as Error).message);
+    if (!(err instanceof CorruptError)) {
+      console.warn("[claude-pool] could not read accounts.json:", (err as Error).message);
+      return emptyAccounts();
+    }
+  }
+  try {
+    // Re-read under the lock: another process may have replaced the file meanwhile.
+    return withLock(lockFile(dataDir), () => loadLocked(path));
+  } catch (err) {
+    console.warn("[claude-pool] could not read accounts.json:", (err as Error).message);
     return emptyAccounts();
+  }
+}
+
+function checkConfigDirs(file: AccountsFile): void {
+  for (const a of file.accounts) {
+    const dir = a.configDir.trim();
+    if (!dir) throw new Error("configDir must not be empty");
+    const homeRelative = dir === "~" || dir.startsWith("~/") || dir.startsWith("~\\");
+    if (!homeRelative && !isAbsolute(dir)) throw new Error(`configDir must be absolute: ${a.configDir}`);
   }
 }
 
 export function updateAccounts(mutate: (file: AccountsFile) => void, dataDir: string = poolDataDir()): AccountsFile {
   return withLock(lockFile(dataDir), () => {
-    const file = readAccounts(dataDir);
+    const file = loadLocked(accountsFile(dataDir));
     mutate(file);
+    checkConfigDirs(file);
     for (const a of file.accounts) a.configDir = normalizeDir(a.configDir);
+    if (new Set(file.accounts.map((a) => a.configDir)).size !== file.accounts.length) {
+      throw new Error("duplicate configDir");
+    }
     const valid = parse(file);
     writeJsonAtomic(accountsFile(dataDir), valid);
     return valid;

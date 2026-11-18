@@ -177,7 +177,7 @@ The prompt cache is per account, so the first turn after a move is always a cold
 On `POST /quota` (`usage.read`, wire v1):
 
 1. For each enabled account, read the credential (section 7) and call `GET https://api.anthropic.com/api/oauth/usage` with it, all accounts in parallel, 8 s timeout each.
-2. On success, write the windows to `state.json` (`source: "oauth_usage"`). On 401, set `needsLogin`. On an expired token or a network failure, fall back to the last `state.json` values and note how old they are.
+2. On success, write the windows to `state.json`. On 401, set `needsLogin`. On an expired token or a network failure, fall back to the last `state.json` values and note how old they are.
 3. Answer:
    - `windows`: the 5h and 7d windows of the account the pool would pick now (router output), each `valueLabel` prefixed with the account label;
    - `models`: one group per account, keyed by label, with `5h` and `7d` windows (`usedPercent`, `windowSeconds`, `resetAt`), at most 64 accounts;
