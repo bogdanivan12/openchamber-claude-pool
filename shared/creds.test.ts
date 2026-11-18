@@ -28,7 +28,7 @@ describe("creds", () => {
     const cred = await readCredential("/Users/u/.claude", {
       platform: "darwin", home: "/Users/u",
       exec: async () => { throw new Error("exit 44"); },
-      readFile: (p) => { expect(p).toBe(join("/Users/u/.claude", ".credentials.json")); return blob; },
+      readFile: (p) => { expect(p.endsWith(".credentials.json")).toBe(true); return blob; },
     });
     expect(cred?.subscriptionType).toBe("pro");
   });

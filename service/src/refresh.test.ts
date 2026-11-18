@@ -21,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const readCredential = async (d: string) => ({ accessToken: d.endsWith("/a") ? "ta" : "tb", expiresAt: null, subscriptionType: "pro" });
+const readCredential = async (d: string) => ({ accessToken: /[\\/]a$/.test(d) ? "ta" : "tb", expiresAt: null, subscriptionType: "pro" });
 const body = { limits: [{ kind: "session", percent: 40, resets_at: "2030-01-01T00:00:00Z" }] };
 type Mode = "ok" | "401" | "throw";
 const fetchBy = (modes: { a: Mode; b: Mode }) => (async (_u: any, init: any) => {

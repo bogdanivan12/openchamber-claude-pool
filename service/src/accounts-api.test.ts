@@ -26,6 +26,14 @@ const setup = (extra: Parameters<typeof accountRoutes>[0] = {}) => {
 };
 
 describe("account api", () => {
+  it("refreshes usage when the list is read, at most once per throttle window, and survives a failing refresh", async () => {
+    let n = 0;
+    const { call } = setup({ refreshUsage: async () => { n++; throw new Error("boom"); } });
+    expect((await call("GET /api/accounts")).status).toBe(200);
+    await call("GET /api/accounts");
+    expect(n).toBe(1);
+  });
+
   it("imports dirs with their email and plan, skipping duplicates", async () => {
     const { home, dataDir, call } = setup();
     const out: any = await call("POST /api/import", { configDirs: [join(home, ".claude"), join(home, ".claude-b"), join(home, ".claude")] });
@@ -355,7 +363,7 @@ describe("import candidates", () => {
       listHome: () => [".claude", ".claude-nologin", ".claude-ok"],
       hasCredential: async (d) => !d.endsWith(".claude-nologin"),
     });
-    expect(c).toEqual(["/h/.claude", "/h/.claude-ok"]);
+    expect(c).toEqual([join("/h", ".claude"), join("/h", ".claude-ok")]);
   });
 
   it("GET route hides ~/.claude-pool and non-directories on a real home", async () => {
@@ -398,7 +406,7 @@ describe("auth status", () => {
       ".claude-ok": { authMethod: "claude.ai", apiProvider: "firstParty" },
     };
     const { home, dataDir, call } = setup({
-      authStatus: (dir) => readAuthStatus(dir, { run: async () => JSON.stringify({ loggedIn: true, email: "a@b.c", subscriptionType: "pro", ...payloads[dir.split("/").pop()!] }) }),
+      authStatus: (dir) => readAuthStatus(dir, { run: async () => JSON.stringify({ loggedIn: true, email: "a@b.c", subscriptionType: "pro", ...payloads[dir.split(/[\\/]/).pop()!] }) }),
     });
     const out = await call("POST /api/import", { configDirs: Object.keys(payloads).map((n) => join(home, n)) });
     expect(out.body.added.map((a: any) => a.configDir)).toEqual([join(home, ".claude-ok")]);
