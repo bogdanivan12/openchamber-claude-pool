@@ -68,7 +68,7 @@ function createServer(routes, token) {
 }
 
 // service/src/accounts-api.ts
-import { existsSync as existsSync3, rmSync } from "node:fs";
+import { existsSync as existsSync3, renameSync as renameSync3, rmSync } from "node:fs";
 import { homedir as homedir4 } from "node:os";
 
 // plugin/src/executable-path.ts
@@ -6440,6 +6440,43 @@ function clampPercent(p) {
   return Math.min(100, Math.max(0, round1(p)));
 }
 
+// plugin/src/query.ts
+var ALLOWED_PERMISSION_MODES = new Set([
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+  "dontAsk"
+]);
+
+// plugin/src/detect.ts
+function interpretClaudeAuthStatus(payload) {
+  if (!payload || typeof payload !== "object") {
+    return { loggedIn: false, detail: "invalid-auth-status" };
+  }
+  const root = payload;
+  const loggedIn = Boolean(root.loggedIn);
+  const authMethod = typeof root.authMethod === "string" ? root.authMethod : "none";
+  const normalized = authMethod.trim().toLowerCase();
+  if (!loggedIn) {
+    return { loggedIn: false, detail: "auth-status-logged-out", authMethod };
+  }
+  const apiProvider = typeof root.apiProvider === "string" ? root.apiProvider.trim() : "";
+  if (apiProvider && apiProvider !== "firstParty") {
+    return { loggedIn: false, detail: "third-party-provider", authMethod };
+  }
+  if (normalized === "none" || normalized.includes("api") || normalized.includes("console")) {
+    return { loggedIn: false, detail: "api-key-only", authMethod };
+  }
+  const subscription = ["oauth", "claude", "subscription"].some((hint) => normalized.includes(hint));
+  return {
+    loggedIn: true,
+    detail: subscription ? "auth-status-oauth" : "auth-status-logged-in",
+    authMethod
+  };
+}
+var subscriptionChecks = new Map;
+
 // service/src/auth-status.ts
 var SIGNED_OUT = { loggedIn: false, email: null, plan: null };
 function envForDir(configDir) {
@@ -6470,7 +6507,7 @@ async function readAuthStatus(configDir, deps = {}) {
   try {
     const j = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1));
     return {
-      loggedIn: j.loggedIn === true,
+      loggedIn: interpretClaudeAuthStatus(j).loggedIn,
       email: typeof j.email === "string" ? j.email : null,
       plan: typeof j.subscriptionType === "string" ? j.subscriptionType : null
     };
@@ -6520,8 +6557,16 @@ async function findImportCandidates(deps) {
 
 // service/src/accounts-api.ts
 var MAX_LABEL = 40;
+var NOT_SUBSCRIPTION = "not signed in to a Claude subscription (API-key and third-party logins are not supported)";
 var NAME_TAKEN = "Another account already uses this name";
-var json = (r) => r.body ? JSON.parse(r.body) : {};
+
+class NameTakenError extends Error {
+}
+function bodyObject(r) {
+  const value = r.body ? JSON.parse(r.body) : {};
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+var NOT_OBJECT = { status: 400, body: { error: "Expected a JSON object" } };
 var bad = (message) => ({ status: 400, body: { error: message } });
 var sameLabel = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 function uniqueLabel(base, taken) {
@@ -6562,12 +6607,26 @@ function accountRoutes(deps = {}) {
         }
       };
     },
+    "POST /api/accounts/ack-backup": () => {
+      const bak = `${accountsFile(dataDir)}.bak`;
+      if (existsSync3(bak)) {
+        try {
+          renameSync3(bak, `${bak}.ack-${Date.now()}`);
+        } catch (err) {
+          return { status: 500, body: { error: err instanceof Error ? err.message : "could not acknowledge the backup" } };
+        }
+      }
+      return { status: 200, body: { ok: true } };
+    },
     "GET /api/import-candidates": async () => ({
       status: 200,
       body: { candidates: await findImportCandidates({ home, existing: readAccounts(dataDir).accounts.map((a) => a.configDir), hasCredential }) }
     }),
     "POST /api/import": async (r) => {
-      const dirs = json(r).configDirs;
+      const body = bodyObject(r);
+      if (!body)
+        return NOT_OBJECT;
+      const dirs = body.configDirs;
       if (!Array.isArray(dirs) || !dirs.every((d) => typeof d === "string"))
         return bad("configDirs must be a list of folders");
       const added = [];
@@ -6576,28 +6635,47 @@ function accountRoutes(deps = {}) {
         if (!raw.trim())
           return bad("configDirs must not contain empty folders");
         const dir = normalizeDir(raw, home);
-        if (readAccounts(dataDir).accounts.some((a) => normalizeDir(a.configDir, home) === dir)) {
-          skipped.push({ configDir: dir, reason: "already in the pool" });
-          continue;
+        try {
+          const taken = (f) => f.accounts.some((a) => normalizeDir(a.configDir, home) === dir);
+          if (taken(readAccounts(dataDir))) {
+            skipped.push({ configDir: dir, reason: "already in the pool" });
+            continue;
+          }
+          const info = await authStatus(dir);
+          if (!info.loggedIn) {
+            skipped.push({ configDir: dir, reason: NOT_SUBSCRIPTION });
+            continue;
+          }
+          let raced = false;
+          const next = updateAccounts((f) => {
+            if (taken(f)) {
+              raced = true;
+              return;
+            }
+            const id = newAccountId(f.accounts.map((a) => a.id));
+            const base = info.email?.split("@")[0]?.trim() || `account ${f.accounts.length + 1}`;
+            const label = uniqueLabel(base, f.accounts.map((a) => a.label));
+            f.accounts.push({ id, label, configDir: dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
+          }, dataDir);
+          if (raced)
+            skipped.push({ configDir: dir, reason: "already in the pool" });
+          else
+            added.push(next.accounts.at(-1));
+        } catch (err) {
+          skipped.push({ configDir: dir, reason: err instanceof Error ? err.message : "import failed" });
         }
-        const info = await authStatus(dir);
-        if (!info.loggedIn) {
-          skipped.push({ configDir: dir, reason: "not signed in to a Claude subscription" });
-          continue;
-        }
-        const next = updateAccounts((f) => {
-          const id = newAccountId(f.accounts.map((a) => a.id));
-          const base = info.email?.split("@")[0] || `account ${f.accounts.length + 1}`;
-          const label = uniqueLabel(base, f.accounts.map((a) => a.label));
-          f.accounts.push({ id, label, configDir: dir, order: f.accounts.length, enabled: true, ...info.email ? { email: info.email } : {}, ...info.plan ? { plan: info.plan } : {} });
-        }, dataDir);
-        added.push(next.accounts.at(-1));
       }
       return { status: 200, body: { added, skipped } };
     },
     "PATCH /api/accounts/:id": (r) => {
       const id = r.query.get("id");
-      const patch = json(r);
+      const patch = bodyObject(r);
+      if (!patch)
+        return NOT_OBJECT;
+      if ("label" in patch && typeof patch.label !== "string")
+        return bad("Name must be text");
+      if ("enabled" in patch && typeof patch.enabled !== "boolean")
+        return bad("enabled must be true or false");
       const label = typeof patch.label === "string" ? patch.label.trim() : undefined;
       if (label !== undefined && (label.length < 1 || label.length > MAX_LABEL))
         return bad(`Name must be 1 to ${MAX_LABEL} characters`);
@@ -6609,19 +6687,24 @@ function accountRoutes(deps = {}) {
             return;
           if (label !== undefined) {
             if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label)))
-              throw new Error(NAME_TAKEN);
+              throw new NameTakenError(NAME_TAKEN);
             found.label = label;
           }
           if (typeof patch.enabled === "boolean")
             found.enabled = patch.enabled;
         }, dataDir);
       } catch (err) {
-        return bad(err instanceof Error ? err.message : "invalid change");
+        if (err instanceof NameTakenError)
+          return bad(err.message);
+        throw err;
       }
       return found ? { status: 200, body: found } : { status: 404, body: { error: "no such account" } };
     },
     "POST /api/accounts/reorder": (r) => {
-      const ids = json(r).ids;
+      const body = bodyObject(r);
+      if (!body)
+        return NOT_OBJECT;
+      const ids = body.ids;
       if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string"))
         return bad("ids must be a list of account ids");
       updateAccounts((f) => {
@@ -6641,18 +6724,24 @@ function accountRoutes(deps = {}) {
       }, dataDir);
       if (!removed)
         return { status: 404, body: { error: "no such account" } };
-      let deletedLogin = false;
       if (r.query.get("deleteLogin") === "1" && isInsidePoolAccounts(removed.configDir, dataDir)) {
         try {
           await logout(removed.configDir);
         } catch {}
-        rmSync(removed.configDir, { recursive: true, force: true });
-        deletedLogin = true;
+        try {
+          rmSync(removed.configDir, { recursive: true, force: true });
+          return { status: 200, body: { ok: true, deletedLogin: true } };
+        } catch (err) {
+          return { status: 200, body: { ok: true, deletedLogin: false, warning: err instanceof Error ? err.message : "could not delete the login folder" } };
+        }
       }
-      return { status: 200, body: { ok: true, deletedLogin } };
+      return { status: 200, body: { ok: true, deletedLogin: false } };
     },
     "PUT /api/settings": (r) => {
-      const t = json(r).threshold;
+      const body = bodyObject(r);
+      if (!body)
+        return NOT_OBJECT;
+      const t = body.threshold;
       if (typeof t !== "number" || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD)
         return bad(`threshold must be ${MIN_THRESHOLD}..${MAX_THRESHOLD}`);
       const f = updateAccounts((file) => {

@@ -1,4 +1,5 @@
 import { buildClaudeCodeChildEnv } from "../../plugin/src/auth-env.ts";
+import { interpretClaudeAuthStatus } from "../../plugin/src/detect.ts";
 import { resolveClaudeCli, runCliProbe } from "../../plugin/src/executable-path.ts";
 import { isDefaultConfigDir } from "../../shared/paths.ts";
 
@@ -33,7 +34,7 @@ export async function readAuthStatus(configDir: string, deps: { run?: (dir: stri
   try {
     const j = JSON.parse(out.slice(out.indexOf("{"), out.lastIndexOf("}") + 1));
     return {
-      loggedIn: j.loggedIn === true,
+      loggedIn: interpretClaudeAuthStatus(j).loggedIn,
       email: typeof j.email === "string" ? j.email : null,
       plan: typeof j.subscriptionType === "string" ? j.subscriptionType : null,
     };

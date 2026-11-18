@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolveClaudeCli } from "../../plugin/src/executable-path.ts";
 import { MAX_THRESHOLD, MIN_THRESHOLD, enabledAccounts, newAccountId, readAccounts, updateAccounts, type Account } from "../../shared/accounts.ts";
@@ -11,9 +11,17 @@ import type { Route } from "./http.ts";
 import { findImportCandidates } from "./import.ts";
 
 const MAX_LABEL = 40;
+const NOT_SUBSCRIPTION = "not signed in to a Claude subscription (API-key and third-party logins are not supported)";
 const NAME_TAKEN = "Another account already uses this name";
 
-const json = (r: { body: string }) => (r.body ? JSON.parse(r.body) : {});
+class NameTakenError extends Error {}
+
+/** The request body as a plain object; an empty body is `{}`; null if it is JSON of another shape. Bad JSON throws SyntaxError (the server answers 400). */
+function bodyObject(r: { body: string }): Record<string, unknown> | null {
+  const value: unknown = r.body ? JSON.parse(r.body) : {};
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+const NOT_OBJECT = { status: 400, body: { error: "Expected a JSON object" } };
 const bad = (message: string) => ({ status: 400, body: { error: message } });
 const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -66,42 +74,66 @@ export function accountRoutes(deps: {
       };
     },
 
+    "POST /api/accounts/ack-backup": () => {
+      const bak = `${accountsFile(dataDir)}.bak`;
+      if (existsSync(bak)) {
+        try { renameSync(bak, `${bak}.ack-${Date.now()}`); } catch (err) {
+          return { status: 500, body: { error: err instanceof Error ? err.message : "could not acknowledge the backup" } };
+        }
+      }
+      return { status: 200, body: { ok: true } };
+    },
+
     "GET /api/import-candidates": async () => ({
       status: 200,
       body: { candidates: await findImportCandidates({ home, existing: readAccounts(dataDir).accounts.map((a) => a.configDir), hasCredential }) },
     }),
 
     "POST /api/import": async (r) => {
-      const dirs: unknown = json(r).configDirs;
+      const body = bodyObject(r);
+      if (!body) return NOT_OBJECT;
+      const dirs: unknown = body.configDirs;
       if (!Array.isArray(dirs) || !dirs.every((d) => typeof d === "string")) return bad("configDirs must be a list of folders");
       const added: Account[] = [];
       const skipped: { configDir: string; reason: string }[] = [];
       for (const raw of dirs as string[]) {
         if (!raw.trim()) return bad("configDirs must not contain empty folders");
         const dir = normalizeDir(raw, home);
-        if (readAccounts(dataDir).accounts.some((a) => normalizeDir(a.configDir, home) === dir)) {
-          skipped.push({ configDir: dir, reason: "already in the pool" });
-          continue;
+        try {
+          const taken = (f: { accounts: Account[] }) => f.accounts.some((a) => normalizeDir(a.configDir, home) === dir);
+          if (taken(readAccounts(dataDir))) {
+            skipped.push({ configDir: dir, reason: "already in the pool" });
+            continue;
+          }
+          const info = await authStatus(dir);
+          if (!info.loggedIn) {
+            skipped.push({ configDir: dir, reason: NOT_SUBSCRIPTION });
+            continue;
+          }
+          let raced = false;
+          const next = updateAccounts((f) => {
+            // Re-checked under the lock: a concurrent import may have added this dir meanwhile.
+            if (taken(f)) { raced = true; return; }
+            const id = newAccountId(f.accounts.map((a) => a.id));
+            const base = info.email?.split("@")[0]?.trim() || `account ${f.accounts.length + 1}`;
+            const label = uniqueLabel(base, f.accounts.map((a) => a.label));
+            f.accounts.push({ id, label, configDir: dir, order: f.accounts.length, enabled: true, ...(info.email ? { email: info.email } : {}), ...(info.plan ? { plan: info.plan } : {}) });
+          }, dataDir);
+          if (raced) skipped.push({ configDir: dir, reason: "already in the pool" });
+          else added.push(next.accounts.at(-1)!);
+        } catch (err) {
+          skipped.push({ configDir: dir, reason: err instanceof Error ? err.message : "import failed" });
         }
-        const info = await authStatus(dir);
-        if (!info.loggedIn) {
-          skipped.push({ configDir: dir, reason: "not signed in to a Claude subscription" });
-          continue;
-        }
-        const next = updateAccounts((f) => {
-          const id = newAccountId(f.accounts.map((a) => a.id));
-          const base = info.email?.split("@")[0] || `account ${f.accounts.length + 1}`;
-          const label = uniqueLabel(base, f.accounts.map((a) => a.label));
-          f.accounts.push({ id, label, configDir: dir, order: f.accounts.length, enabled: true, ...(info.email ? { email: info.email } : {}), ...(info.plan ? { plan: info.plan } : {}) });
-        }, dataDir);
-        added.push(next.accounts.at(-1)!);
       }
       return { status: 200, body: { added, skipped } };
     },
 
     "PATCH /api/accounts/:id": (r) => {
       const id = r.query.get("id")!;
-      const patch = json(r) as { label?: unknown; enabled?: unknown };
+      const patch = bodyObject(r);
+      if (!patch) return NOT_OBJECT;
+      if ("label" in patch && typeof patch.label !== "string") return bad("Name must be text");
+      if ("enabled" in patch && typeof patch.enabled !== "boolean") return bad("enabled must be true or false");
       const label = typeof patch.label === "string" ? patch.label.trim() : undefined;
       if (label !== undefined && (label.length < 1 || label.length > MAX_LABEL)) return bad(`Name must be 1 to ${MAX_LABEL} characters`);
       let found: Account | undefined;
@@ -110,19 +142,22 @@ export function accountRoutes(deps: {
           found = f.accounts.find((a) => a.id === id);
           if (!found) return;
           if (label !== undefined) {
-            if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label))) throw new Error(NAME_TAKEN);
+            if (f.accounts.some((a) => a.id !== id && sameLabel(a.label, label))) throw new NameTakenError(NAME_TAKEN);
             found.label = label;
           }
           if (typeof patch.enabled === "boolean") found.enabled = patch.enabled;
         }, dataDir);
       } catch (err) {
-        return bad(err instanceof Error ? err.message : "invalid change");
+        if (err instanceof NameTakenError) return bad(err.message);
+        throw err;
       }
       return found ? { status: 200, body: found } : { status: 404, body: { error: "no such account" } };
     },
 
     "POST /api/accounts/reorder": (r) => {
-      const ids: unknown = json(r).ids;
+      const body = bodyObject(r);
+      if (!body) return NOT_OBJECT;
+      const ids: unknown = body.ids;
       if (!Array.isArray(ids) || !ids.every((i) => typeof i === "string")) return bad("ids must be a list of account ids");
       updateAccounts((f) => {
         const rank = new Map((ids as string[]).map((id, i) => [id, i]));
@@ -141,18 +176,24 @@ export function accountRoutes(deps: {
         f.accounts.forEach((a, i) => (a.order = i));
       }, dataDir);
       if (!removed) return { status: 404, body: { error: "no such account" } };
-      let deletedLogin = false;
       if (r.query.get("deleteLogin") === "1" && isInsidePoolAccounts(removed.configDir, dataDir)) {
         // Removes the Keychain item the dir leaves behind; best effort, never blocks the delete.
         try { await logout(removed.configDir); } catch {}
-        rmSync(removed.configDir, { recursive: true, force: true });
-        deletedLogin = true;
+        try {
+          rmSync(removed.configDir, { recursive: true, force: true });
+          return { status: 200, body: { ok: true, deletedLogin: true } };
+        } catch (err) {
+          // The account is already gone from the pool; report the leftover folder instead of failing.
+          return { status: 200, body: { ok: true, deletedLogin: false, warning: err instanceof Error ? err.message : "could not delete the login folder" } };
+        }
       }
-      return { status: 200, body: { ok: true, deletedLogin } };
+      return { status: 200, body: { ok: true, deletedLogin: false } };
     },
 
     "PUT /api/settings": (r) => {
-      const t = json(r).threshold;
+      const body = bodyObject(r);
+      if (!body) return NOT_OBJECT;
+      const t = body.threshold;
       if (typeof t !== "number" || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD) return bad(`threshold must be ${MIN_THRESHOLD}..${MAX_THRESHOLD}`);
       const f = updateAccounts((file) => { file.threshold = t; }, dataDir);
       return { status: 200, body: { threshold: f.threshold } };
