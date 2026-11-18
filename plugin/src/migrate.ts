@@ -19,7 +19,7 @@ export function migrateTranscript(sessionId: string, fromDir: string, toDir: str
     const dest = join(toDir, "projects", rel);
     if (!(existsSync(dest) && statSync(dest).mtimeMs >= statSync(src).mtimeMs)) {
       mkdirSync(dirname(dest), { recursive: true });
-      const tmp = `${dest}.tmp`;
+      const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`;
       try {
         cpSync(src, tmp, { preserveTimestamps: true });
         renameSync(tmp, dest);
