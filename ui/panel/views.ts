@@ -23,7 +23,19 @@ export function renderBanners(ctx: Ctx, page: HTMLElement): void {
       action: { label: "Dismiss", onClick: () => void ctx.run(async () => { await ctx.client.ackBackup(); }) },
     });
   }
-  for (const n of ctx.notices) mountBanner(page, n);
+  renderNotices(ctx, page);
+}
+
+/** Raised notices. One with its own action also gets a Dismiss button, since a banner holds a single action. */
+export function renderNotices(ctx: Ctx, page: HTMLElement): void {
+  for (const n of ctx.notices) {
+    mountBanner(page, n);
+    if (n.action && n.action.label !== "Dismiss") {
+      const row = el("div", "row");
+      mountButton(row, { label: "Dismiss", variant: "ghost", size: "xs", onClick: () => ctx.dismiss(n) });
+      page.append(row);
+    }
+  }
 }
 
 export function renderList(ctx: Ctx, page: HTMLElement): void {
@@ -34,6 +46,7 @@ export function renderList(ctx: Ctx, page: HTMLElement): void {
 
   const head = el("div", "row");
   head.append(el("strong", "grow", "Claude accounts"));
+  const refreshBtn = mountButton(head, { label: "Refresh", variant: "ghost", onClick: () => void ctx.run(async () => {}, refreshBtn) });
   mountButton(head, { label: "Add account", disabled: f.adding !== null, onClick: () => { ctx.notices.length = 0; f.adding = { name: "" }; ctx.render(); } });
   const importBtn = mountButton(head, { label: "Import", variant: "outline", disabled: f.importing !== null, onClick: () => {
     void ctx.run(async () => {
@@ -57,11 +70,11 @@ export function renderList(ctx: Ctx, page: HTMLElement): void {
 function addRow(ctx: Ctx): HTMLElement {
   const box = el("div", "acct");
   const adding = ctx.flows.adding!;
-  const field = mountTextField(box, { label: "Name for the new account (e.g. work, personal)", value: adding.name, error: adding.error, onChange: (v) => { adding.name = v; field.update({ value: v }); } });
+  const field = mountTextField(box, { label: "Name for the new account (e.g. work, personal)", value: adding.name, error: adding.error, onChange: (v) => { adding.name = v; adding.error = undefined; field.update({ value: v, error: undefined }); } });
   const row = el("div", "row");
   const start = mountButton(row, { label: "Start", onClick: () => {
     const label = adding.name.trim();
-    if (!label) { field.update({ error: "Enter a name." }); return; }
+    if (!label) { adding.error = "Enter a name."; field.update({ error: adding.error }); return; }
     void ctx.run(async () => {
       ctx.flows.adding = null;
       try { await ctx.startLogin({ label }); } catch (e) { ctx.flows.adding = adding; throw e; }
@@ -86,7 +99,7 @@ function importPanel(ctx: Ctx): HTMLElement {
     void ctx.run(async () => {
       const out = await ctx.client.import(dirs);
       ctx.flows.importing = null;
-      if (out.skipped.length) ctx.notify({ tone: "warning", title: "Some logins were skipped", body: out.skipped.map((s) => `${s.configDir}: ${s.reason}`).join("\n") });
+      if (out.skipped.length) ctx.notify({ tone: "warning", title: "Some logins were skipped", body: out.skipped.map((s) => `${s.configDir}: ${s.reason}`).join("; ") });
     }, go);
   } });
   mountButton(row, { label: "Cancel", variant: "ghost", onClick: () => { ctx.flows.importing = null; ctx.render(); } });
@@ -138,11 +151,11 @@ function accountCard(ctx: Ctx, a: AccountView, index: number, all: AccountView[]
 function renameRow(ctx: Ctx, a: AccountView): HTMLElement {
   const box = el("div", "stack");
   const r = ctx.flows.renaming!;
-  const field = mountTextField(box, { label: "New name", value: r.text, error: r.error, onChange: (v) => { r.text = v; field.update({ value: v }); } });
+  const field = mountTextField(box, { label: "New name", value: r.text, error: r.error, onChange: (v) => { r.text = v; r.error = undefined; field.update({ value: v, error: undefined }); } });
   const row = el("div", "row");
   const save = mountButton(row, { label: "Save", size: "sm", onClick: () => {
     const label = r.text.trim();
-    if (!label) { field.update({ error: "Enter a name." }); return; }
+    if (!label) { r.error = "Enter a name."; field.update({ error: r.error }); return; }
     // A rejected name (duplicate, invalid) keeps the field open with the service's message.
     void ctx.run(async () => {
       try { await ctx.client.patch(a.id, { label }); ctx.flows.renaming = null; }
@@ -182,11 +195,11 @@ function thresholdBox(ctx: Ctx, saved: number): HTMLElement {
     value: t.text,
     error: t.error,
     helper: "50–100. The pool moves a conversation to another account once its account passes this.",
-    onChange: (v) => { t.text = v; field.update({ value: v }); },
+    onChange: (v) => { t.text = v; t.error = undefined; field.update({ value: v, error: undefined }); },
   });
   const save = mountButton(box, { label: "Save", variant: "secondary", size: "sm", onClick: () => {
     const v = validateThreshold(t.text);
-    if (!v.ok) { field.update({ error: v.error }); return; }
+    if (!v.ok) { t.error = v.error; field.update({ error: v.error }); return; }
     void ctx.run(async () => {
       try { await ctx.client.setThreshold(v.value); ctx.flows.threshold = null; }
       catch (e) { t.error = (e as Error).message; }

@@ -1,8 +1,22 @@
+import type { HostReadyContext } from "@openchamber/sdk";
 import type { BannerTone, ButtonHandle } from "@openchamber/sdk/ui";
-import type { Client, LoginView } from "../shared/api.ts";
+import type { Client, Host, LoginView } from "../shared/api.ts";
 import type { AccountView } from "../shared/format.ts";
 
-export type Notice = { tone: BannerTone; title: string; body?: string; action?: { label: string; onClick: () => void } };
+/** The part of the SDK host the panel uses. */
+export type PanelHost = Host & {
+  openUrl(url: string): Promise<unknown>;
+  onReady(listener: (context: HostReadyContext) => void): unknown;
+};
+
+export type Notice = {
+  tone: BannerTone;
+  title: string;
+  body?: string;
+  action?: { label: string; onClick: () => void };
+  /** Runs when the user dismisses the banner. */
+  onDismiss?: () => void;
+};
 export type ListData = { accounts: AccountView[]; threshold: number; recoveredBackup: boolean; cliFound: boolean };
 export type AwaitingCode = Extract<LoginView, { state: "awaiting-code" }>;
 
@@ -23,15 +37,20 @@ export type Flows = {
 };
 
 export type Ctx = {
-  host: { openUrl(url: string): Promise<unknown> };
+  host: PanelHost;
   client: Client;
   data: ListData | null;
+  /** True until the first list answer (or failure) arrives. */
+  loading: boolean;
   screen: Screen;
   flows: Flows;
   notices: Notice[];
-  /** Shows a banner. Gets a Dismiss action unless it brings its own. */
+  /** Waits; injectable so tests do not wait a real second. */
+  sleep(ms: number): Promise<void>;
+  /** Shows a banner unless an identical one is showing. Without an action it gets a Dismiss. */
   notify(n: Notice): void;
-  /** Runs one guarded request at a time. Errors become banners. Refreshes the list at the end unless `rerender` is false. */
+  dismiss(n: Notice): void;
+  /** Runs one guarded request at a time. Errors become banners. Refreshes the list at the end. */
   run(fn: () => Promise<void>, btn?: ButtonHandle, opts?: { keepNotices?: boolean }): Promise<void>;
   render(): void;
   refresh(): Promise<void>;

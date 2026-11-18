@@ -2361,8 +2361,34 @@ var mountProgress = (root, initial) => {
   };
 };
 // ui/shared/api.ts
+function errorText2(v) {
+  if (typeof v === "string")
+    return v;
+  try {
+    return JSON.stringify(v) ?? String(v);
+  } catch {
+    return String(v);
+  }
+}
+function classifyRequestError(e) {
+  const raw = e instanceof Error ? e.message : errorText2(e);
+  const code = typeof e?.code === "string" ? e.code : "";
+  const has = (...names) => names.some((n) => code === n || raw.includes(n));
+  if (has("NO_SERVICE", "NO_INTEGRATION", "DISABLED", "NOT_GRANTED")) {
+    return new Error(`The Claude Pool service is not approved or not running. Re-approve the extension in Settings → Extensions. (${raw})`);
+  }
+  if (has("SERVICE_FAILED", "DISCONNECTED", "HOST_TIMEOUT", "HOST_UNAVAILABLE")) {
+    return new Error(`The Claude Pool service stopped; try again. (${raw})`);
+  }
+  return new Error(raw);
+}
 async function call(host, method, path, body, query) {
-  const res = await host.serviceRequest({ method, path, ...query ? { query } : {}, ...body !== undefined ? { body: JSON.stringify(body) } : {} });
+  let res;
+  try {
+    res = await host.serviceRequest({ method, path, ...query ? { query } : {}, ...body !== undefined ? { body: JSON.stringify(body) } : {} });
+  } catch (e) {
+    throw classifyRequestError(e);
+  }
   let parsed = {};
   try {
     parsed = res.body ? JSON.parse(res.body) : {};
@@ -2371,16 +2397,17 @@ async function call(host, method, path, body, query) {
       throw new Error("The service sent an unreadable answer.");
   }
   if (res.status >= 400)
-    throw new Error(parsed?.error ?? `HTTP ${res.status}`);
+    throw new Error(parsed?.error !== undefined ? errorText2(parsed.error) : `HTTP ${res.status}`);
   return parsed;
 }
+var id = encodeURIComponent;
 var api = (host) => ({
   list: () => call(host, "GET", "/api/accounts"),
   candidates: () => call(host, "GET", "/api/import-candidates"),
   import: (configDirs) => call(host, "POST", "/api/import", { configDirs }),
-  patch: (id, p) => call(host, "PATCH", `/api/accounts/${id}`, p),
+  patch: (accountId, p) => call(host, "PATCH", `/api/accounts/${id(accountId)}`, p),
   reorder: (ids) => call(host, "POST", "/api/accounts/reorder", { ids }),
-  remove: (id, deleteLogin) => call(host, "DELETE", `/api/accounts/${id}`, undefined, deleteLogin ? { deleteLogin: "1" } : undefined),
+  remove: (accountId, deleteLogin) => call(host, "DELETE", `/api/accounts/${id(accountId)}`, undefined, deleteLogin ? { deleteLogin: "1" } : undefined),
   setThreshold: (threshold) => call(host, "PUT", "/api/settings", { threshold }),
   ackBackup: () => call(host, "POST", "/api/accounts/ack-backup"),
   loginStart: (p) => call(host, "POST", "/api/login/start", p),
@@ -2451,8 +2478,17 @@ function renderBanners(ctx, page) {
       }) }
     });
   }
-  for (const n of ctx.notices)
+  renderNotices(ctx, page);
+}
+function renderNotices(ctx, page) {
+  for (const n of ctx.notices) {
     mountBanner(page, n);
+    if (n.action && n.action.label !== "Dismiss") {
+      const row = el2("div", "row");
+      mountButton(row, { label: "Dismiss", variant: "ghost", size: "xs", onClick: () => ctx.dismiss(n) });
+      page.append(row);
+    }
+  }
 }
 function renderList(ctx, page) {
   const data = ctx.data;
@@ -2462,6 +2498,7 @@ function renderList(ctx, page) {
   const f = ctx.flows;
   const head = el2("div", "row");
   head.append(el2("strong", "grow", "Claude accounts"));
+  const refreshBtn = mountButton(head, { label: "Refresh", variant: "ghost", onClick: () => void ctx.run(async () => {}, refreshBtn) });
   mountButton(head, { label: "Add account", disabled: f.adding !== null, onClick: () => {
     ctx.notices.length = 0;
     f.adding = { name: "" };
@@ -2492,13 +2529,15 @@ function addRow(ctx) {
   const adding = ctx.flows.adding;
   const field = mountTextField(box, { label: "Name for the new account (e.g. work, personal)", value: adding.name, error: adding.error, onChange: (v) => {
     adding.name = v;
-    field.update({ value: v });
+    adding.error = undefined;
+    field.update({ value: v, error: undefined });
   } });
   const row = el2("div", "row");
   const start = mountButton(row, { label: "Start", onClick: () => {
     const label = adding.name.trim();
     if (!label) {
-      field.update({ error: "Enter a name." });
+      adding.error = "Enter a name.";
+      field.update({ error: adding.error });
       return;
     }
     ctx.run(async () => {
@@ -2543,8 +2582,7 @@ function importPanel(ctx) {
       const out = await ctx.client.import(dirs);
       ctx.flows.importing = null;
       if (out.skipped.length)
-        ctx.notify({ tone: "warning", title: "Some logins were skipped", body: out.skipped.map((s) => `${s.configDir}: ${s.reason}`).join(`
-`) });
+        ctx.notify({ tone: "warning", title: "Some logins were skipped", body: out.skipped.map((s) => `${s.configDir}: ${s.reason}`).join("; ") });
     }, go);
   } });
   mountButton(row, { label: "Cancel", variant: "ghost", onClick: () => {
@@ -2616,13 +2654,15 @@ function renameRow(ctx, a) {
   const r = ctx.flows.renaming;
   const field = mountTextField(box, { label: "New name", value: r.text, error: r.error, onChange: (v) => {
     r.text = v;
-    field.update({ value: v });
+    r.error = undefined;
+    field.update({ value: v, error: undefined });
   } });
   const row = el2("div", "row");
   const save = mountButton(row, { label: "Save", size: "sm", onClick: () => {
     const label = r.text.trim();
     if (!label) {
-      field.update({ error: "Enter a name." });
+      r.error = "Enter a name.";
+      field.update({ error: r.error });
       return;
     }
     ctx.run(async () => {
@@ -2677,12 +2717,14 @@ function thresholdBox(ctx, saved) {
     helper: "50–100. The pool moves a conversation to another account once its account passes this.",
     onChange: (v) => {
       t.text = v;
-      field.update({ value: v });
+      t.error = undefined;
+      field.update({ value: v, error: undefined });
     }
   });
   const save = mountButton(box, { label: "Save", variant: "secondary", size: "sm", onClick: () => {
     const v = validateThreshold(t.text);
     if (!v.ok) {
+      t.error = v.error;
       field.update({ error: v.error });
       return;
     }
@@ -2701,7 +2743,18 @@ function thresholdBox(ctx, saved) {
 // ui/panel/login-flow.ts
 var VERIFY_POLL_MS = 1000;
 var VERIFY_MAX_POLLS = 60;
-var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var resetLogin = (ctx) => ctx.client.loginCancel().then(() => {
+  return;
+}, () => {
+  return;
+});
+async function openSignInPage(ctx, url) {
+  try {
+    await ctx.host.openUrl(url);
+  } catch (e) {
+    ctx.notify({ tone: "error", title: "Could not open the sign-in page", body: `${e.message} Open this address yourself: ${url}` });
+  }
+}
 async function applyLoginView(ctx, view, fresh) {
   switch (view.state) {
     case "idle":
@@ -2710,13 +2763,8 @@ async function applyLoginView(ctx, view, fresh) {
     case "awaiting-code": {
       const isNew = !ctx.data?.accounts.some((a) => a.id === view.accountId);
       ctx.screen = { kind: "awaiting-code", view, isNew, code: "" };
-      if (fresh) {
-        try {
-          await ctx.host.openUrl(view.url);
-        } catch (e) {
-          ctx.notify({ tone: "warning", title: "Could not open the sign-in page", body: `${e.message} Use the button below to open it.` });
-        }
-      }
+      if (fresh)
+        await openSignInPage(ctx, view.url);
       return;
     }
     case "verifying":
@@ -2727,6 +2775,7 @@ async function applyLoginView(ctx, view, fresh) {
     case "succeeded": {
       ctx.screen = { kind: "list" };
       const acct = view.account;
+      const onDismiss = () => void resetLogin(ctx);
       if (view.duplicateOf) {
         const other = ctx.data?.accounts.find((a) => a.id === view.duplicateOf)?.label;
         ctx.notify({
@@ -2735,14 +2784,18 @@ async function applyLoginView(ctx, view, fresh) {
           body: `${other ? `It is already there as "${other}". ` : ""}Both entries use the same subscription, so the pool gains nothing from the second one.`,
           action: { label: "Remove the duplicate", onClick: () => void ctx.run(async () => {
             await ctx.client.remove(acct.id, false);
-          }) }
+            await resetLogin(ctx);
+          }) },
+          onDismiss
         });
       }
       if (view.emailChanged) {
-        ctx.notify({ tone: "warning", title: `Signed in as ${view.emailChanged.to} (was ${view.emailChanged.from})`, body: "This account's usage and name now refer to a different Claude account." });
+        ctx.notify({ tone: "warning", title: `Signed in as ${view.emailChanged.to} (was ${view.emailChanged.from})`, body: "This account's usage and name now refer to a different Claude account.", onDismiss });
       }
       if (view.warning)
-        ctx.notify({ tone: "info", title: "Signed in, with a note", body: view.warning });
+        ctx.notify({ tone: "info", title: "Signed in, with a note", body: view.warning, onDismiss });
+      if (!view.duplicateOf && !view.emailChanged && !view.warning)
+        await resetLogin(ctx);
       return;
     }
     case "failed":
@@ -2752,7 +2805,7 @@ async function applyLoginView(ctx, view, fresh) {
 }
 async function pollVerifying(ctx) {
   for (let i = 0;i < VERIFY_MAX_POLLS; i++) {
-    await sleep(VERIFY_POLL_MS);
+    await ctx.sleep(VERIFY_POLL_MS);
     let view;
     try {
       view = await ctx.client.login();
@@ -2780,8 +2833,14 @@ async function startLogin(ctx, p) {
 }
 async function resumeLogin(ctx) {
   const view = await ctx.client.login();
-  if (view.state !== "idle")
+  if (view.state === "awaiting-code" || view.state === "verifying")
     await applyLoginView(ctx, view, false);
+  else if (view.state !== "idle")
+    await resetLogin(ctx);
+  if (ctx.screen.kind === "list")
+    await ctx.refresh();
+  else
+    ctx.render();
 }
 function renderLoginScreen(ctx, page) {
   const s = ctx.screen;
@@ -2794,6 +2853,7 @@ function renderLoginScreen(ctx, page) {
   if (s.kind === "failed") {
     mountBanner(page, { tone: "error", title: "Sign-in failed", body: s.message, action: { label: "Back", onClick: () => {
       ctx.screen = { kind: "list" };
+      resetLogin(ctx);
       ctx.refresh();
     } } });
     return;
@@ -2806,17 +2866,19 @@ function renderLoginScreen(ctx, page) {
   if (s.isNew)
     box.append(el2("div", "muted", "A wrong code starts the sign-in over."));
   const link = el2("div", "row");
-  mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void ctx.host.openUrl(s.view.url) });
+  mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void openSignInPage(ctx, s.view.url).then(() => ctx.render()) });
   box.append(link);
   const field = mountTextField(box, { label: "Code", value: s.code, mono: true, error: s.error, onChange: (v) => {
     s.code = v;
-    field.update({ value: v });
+    s.error = undefined;
+    field.update({ value: v, error: undefined });
   } });
   const row = el2("div", "row");
   const submit = mountButton(row, { label: "Finish sign-in", onClick: () => {
     const code = s.code.trim();
     if (!code) {
-      field.update({ error: "Paste the code first." });
+      s.error = "Paste the code first.";
+      field.update({ error: s.error });
       return;
     }
     ctx.run(async () => {
@@ -2838,83 +2900,108 @@ function renderLoginScreen(ctx, page) {
   page.append(box);
 }
 
-// ui/panel/main.ts
-var host = connectHost();
-var root = document.querySelector("#root");
-var busy = false;
-var mounted = false;
-var ctx = {
-  host,
-  client: api(host),
-  data: null,
-  screen: { kind: "list" },
-  flows: { adding: null, renaming: null, removing: null, importing: null, threshold: null },
-  notices: [],
-  notify(n) {
-    const notice = n.action ? n : { ...n, action: { label: "Dismiss", onClick: () => {
-      this.notices = this.notices.filter((x) => x !== notice);
-      this.render();
-    } } };
-    this.notices.push(notice);
-  },
-  async run(fn, btn, opts) {
-    if (busy)
+// ui/panel/app.ts
+var realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function createPanel(host, root, opts = {}) {
+  let busy = false;
+  let mounted = false;
+  let directory;
+  const ctx = {
+    host,
+    client: api(host),
+    data: null,
+    loading: true,
+    screen: { kind: "list" },
+    flows: { adding: null, renaming: null, removing: null, importing: null, threshold: null },
+    notices: [],
+    sleep: opts.sleep ?? realSleep,
+    notify(n) {
+      if (ctx.notices.some((x) => x.tone === n.tone && x.title === n.title && x.body === n.body))
+        return;
+      const notice = n.action ? n : { ...n, action: { label: "Dismiss", onClick: () => ctx.dismiss(notice) } };
+      ctx.notices.push(notice);
+    },
+    dismiss(n) {
+      ctx.notices = ctx.notices.filter((x) => x !== n);
+      n.onDismiss?.();
+      ctx.render();
+    },
+    async run(fn, btn, o) {
+      if (busy)
+        return;
+      busy = true;
+      btn?.update({ loading: true });
+      if (!o?.keepNotices)
+        ctx.notices.length = 0;
+      try {
+        await fn();
+      } catch (e) {
+        ctx.notify({ tone: "error", title: "That did not work", body: e.message });
+      }
+      busy = false;
+      await ctx.refresh();
+    },
+    render() {
+      const page = el2("div", "page");
+      if (ctx.screen.kind === "list") {
+        renderBanners(ctx, page);
+        if (ctx.data)
+          renderList(ctx, page);
+        else if (ctx.loading)
+          mountSpinner(page, { label: "Loading…" });
+        else {
+          const retry = mountButton(page, { label: "Try again", onClick: () => void ctx.run(async () => {}, retry) });
+        }
+      } else {
+        renderNotices(ctx, page);
+        renderLoginScreen(ctx, page);
+      }
+      root.replaceChildren(page);
+    },
+    async refresh() {
+      try {
+        ctx.data = await ctx.client.list();
+      } catch (e) {
+        ctx.data = null;
+        ctx.notify({ tone: "error", title: "The Claude Pool service did not answer", body: e.message });
+      }
+      ctx.loading = false;
+      ctx.render();
+    },
+    startLogin: (p) => startLogin(ctx, p)
+  };
+  async function load() {
+    await ctx.refresh();
+    if (!ctx.data)
       return;
-    busy = true;
-    btn?.update({ loading: true });
-    if (!opts?.keepNotices)
-      this.notices.length = 0;
     try {
-      await fn();
+      await resumeLogin(ctx);
     } catch (e) {
-      this.notify({ tone: "error", title: "That did not work", body: e.message });
+      ctx.notify({ tone: "error", title: "Could not check for a sign-in in progress", body: e.message });
+      ctx.screen = { kind: "list" };
+      await ctx.refresh();
     }
-    busy = false;
-    await this.refresh();
-  },
-  render() {
-    const page = el2("div", "page");
-    if (this.screen.kind === "list") {
-      renderBanners(this, page);
-      if (this.data)
-        renderList(this, page);
-      else
-        mountButton(page, { label: "Try again", onClick: () => void this.refresh() });
-    } else {
-      for (const n of this.notices)
-        mountBanner(page, n);
-      renderLoginScreen(this, page);
-    }
-    root.replaceChildren(page);
-  },
-  async refresh() {
-    try {
-      this.data = await this.client.list();
-    } catch (e) {
-      this.data = null;
-      this.notify({ tone: "error", title: "The Claude Pool service did not answer", body: e.message });
-    }
-    this.render();
-  },
-  startLogin(p) {
-    return startLogin(this, p);
-  }
-};
-async function load() {
-  await ctx.refresh();
-  if (!ctx.data)
-    return;
-  try {
-    await resumeLogin(ctx);
-  } catch (e) {
-    ctx.notify({ tone: "error", title: "Could not check for a sign-in in progress", body: e.message });
   }
   ctx.render();
+  host.onReady((context) => {
+    applyHostReady(context, document.documentElement);
+    if (!mounted) {
+      mounted = true;
+      directory = context.directory;
+      load();
+      return;
+    }
+    if (context.directory !== directory) {
+      directory = context.directory;
+      if (!busy && ctx.screen.kind === "list")
+        ctx.refresh();
+    }
+  });
+  return ctx;
 }
-host.onReady((context) => {
-  applyHostReady(context, document.documentElement);
-  if (mounted)
-    return;
-  mounted = true;
-  load();
-});
+
+// ui/panel/main.ts
+var root = document.querySelector("#root");
+if (!root)
+  throw new Error("Missing #root");
+createPanel(connectHost(), root);

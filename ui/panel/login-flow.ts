@@ -5,7 +5,18 @@ import { el } from "./views.ts";
 
 export const VERIFY_POLL_MS = 1000;
 export const VERIFY_MAX_POLLS = 60;
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Puts the service's login back to idle. A finished result stays there until this runs. Errors are ignored. */
+const resetLogin = (ctx: Ctx) => ctx.client.loginCancel().then(() => undefined, () => undefined);
+
+/** Opens the sign-in page. If the host refuses, the address is shown so the user can copy it. */
+async function openSignInPage(ctx: Ctx, url: string): Promise<void> {
+  try {
+    await ctx.host.openUrl(url);
+  } catch (e) {
+    ctx.notify({ tone: "error", title: "Could not open the sign-in page", body: `${(e as Error).message} Open this address yourself: ${url}` });
+  }
+}
 
 /** Moves the panel to the screen a login view calls for. `fresh` opens the sign-in page; a resumed view only offers the link. */
 export async function applyLoginView(ctx: Ctx, view: LoginView, fresh: boolean): Promise<void> {
@@ -16,10 +27,7 @@ export async function applyLoginView(ctx: Ctx, view: LoginView, fresh: boolean):
     case "awaiting-code": {
       const isNew = !ctx.data?.accounts.some((a) => a.id === view.accountId);
       ctx.screen = { kind: "awaiting-code", view, isNew, code: "" };
-      if (fresh) {
-        try { await ctx.host.openUrl(view.url); }
-        catch (e) { ctx.notify({ tone: "warning", title: "Could not open the sign-in page", body: `${(e as Error).message} Use the button below to open it.` }); }
-      }
+      if (fresh) await openSignInPage(ctx, view.url);
       return;
     }
     case "verifying":
@@ -30,19 +38,23 @@ export async function applyLoginView(ctx: Ctx, view: LoginView, fresh: boolean):
     case "succeeded": {
       ctx.screen = { kind: "list" };
       const acct = view.account;
+      const onDismiss = () => void resetLogin(ctx);
       if (view.duplicateOf) {
         const other = ctx.data?.accounts.find((a) => a.id === view.duplicateOf)?.label;
         ctx.notify({
           tone: "warning",
           title: "This Claude account is already in the pool under another name",
           body: `${other ? `It is already there as "${other}". ` : ""}Both entries use the same subscription, so the pool gains nothing from the second one.`,
-          action: { label: "Remove the duplicate", onClick: () => void ctx.run(async () => { await ctx.client.remove(acct.id, false); }) },
+          action: { label: "Remove the duplicate", onClick: () => void ctx.run(async () => { await ctx.client.remove(acct.id, false); await resetLogin(ctx); }) },
+          onDismiss,
         });
       }
       if (view.emailChanged) {
-        ctx.notify({ tone: "warning", title: `Signed in as ${view.emailChanged.to} (was ${view.emailChanged.from})`, body: "This account's usage and name now refer to a different Claude account." });
+        ctx.notify({ tone: "warning", title: `Signed in as ${view.emailChanged.to} (was ${view.emailChanged.from})`, body: "This account's usage and name now refer to a different Claude account.", onDismiss });
       }
-      if (view.warning) ctx.notify({ tone: "info", title: "Signed in, with a note", body: view.warning });
+      if (view.warning) ctx.notify({ tone: "info", title: "Signed in, with a note", body: view.warning, onDismiss });
+      // Nothing to show later: the result is surfaced, so the service can forget it unless a banner above still waits on the user.
+      if (!view.duplicateOf && !view.emailChanged && !view.warning) await resetLogin(ctx);
       return;
     }
     case "failed":
@@ -54,7 +66,7 @@ export async function applyLoginView(ctx: Ctx, view: LoginView, fresh: boolean):
 /** Polls once per second until the verification ends, for at most VERIFY_MAX_POLLS seconds. Only runs while verifying. */
 async function pollVerifying(ctx: Ctx): Promise<void> {
   for (let i = 0; i < VERIFY_MAX_POLLS; i++) {
-    await sleep(VERIFY_POLL_MS);
+    await ctx.sleep(VERIFY_POLL_MS);
     let view: LoginView;
     try { view = await ctx.client.login(); }
     catch (e) { ctx.screen = { kind: "list" }; throw e; }
@@ -75,10 +87,17 @@ export async function startLogin(ctx: Ctx, p: { label: string } | { accountId: s
   }
 }
 
-/** On load: resume a login that is already in progress (panel reloaded, or the service restarted and is idle). */
+/**
+ * On load: resume a login that is still in progress (panel reloaded, service restarted).
+ * Only awaiting-code and verifying are acted on. A finished result (succeeded/failed) is old news: reset it silently.
+ * Ends with a fresh list when the list is the screen.
+ */
 export async function resumeLogin(ctx: Ctx): Promise<void> {
   const view = await ctx.client.login();
-  if (view.state !== "idle") await applyLoginView(ctx, view, false);
+  if (view.state === "awaiting-code" || view.state === "verifying") await applyLoginView(ctx, view, false);
+  else if (view.state !== "idle") await resetLogin(ctx);
+  if (ctx.screen.kind === "list") await ctx.refresh();
+  else ctx.render();
 }
 
 export function renderLoginScreen(ctx: Ctx, page: HTMLElement): void {
@@ -90,7 +109,7 @@ export function renderLoginScreen(ctx: Ctx, page: HTMLElement): void {
     return;
   }
   if (s.kind === "failed") {
-    mountBanner(page, { tone: "error", title: "Sign-in failed", body: s.message, action: { label: "Back", onClick: () => { ctx.screen = { kind: "list" }; void ctx.refresh(); } } });
+    mountBanner(page, { tone: "error", title: "Sign-in failed", body: s.message, action: { label: "Back", onClick: () => { ctx.screen = { kind: "list" }; void resetLogin(ctx); void ctx.refresh(); } } });
     return;
   }
   if (s.kind !== "awaiting-code") return;
@@ -100,13 +119,13 @@ export function renderLoginScreen(ctx: Ctx, page: HTMLElement): void {
   box.append(el("div", "", "Sign in on the Claude page that opened, then paste the code it shows."));
   if (s.isNew) box.append(el("div", "muted", "A wrong code starts the sign-in over."));
   const link = el("div", "row");
-  mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void ctx.host.openUrl(s.view.url) });
+  mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void openSignInPage(ctx, s.view.url).then(() => ctx.render()) });
   box.append(link);
-  const field = mountTextField(box, { label: "Code", value: s.code, mono: true, error: s.error, onChange: (v) => { s.code = v; field.update({ value: v }); } });
+  const field = mountTextField(box, { label: "Code", value: s.code, mono: true, error: s.error, onChange: (v) => { s.code = v; s.error = undefined; field.update({ value: v, error: undefined }); } });
   const row = el("div", "row");
   const submit = mountButton(row, { label: "Finish sign-in", onClick: () => {
     const code = s.code.trim();
-    if (!code) { field.update({ error: "Paste the code first." }); return; }
+    if (!code) { s.error = "Paste the code first."; field.update({ error: s.error }); return; }
     void ctx.run(async () => {
       try {
         await applyLoginView(ctx, await ctx.client.loginCode(code), false);
