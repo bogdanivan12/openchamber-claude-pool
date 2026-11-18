@@ -3,6 +3,10 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const target = process.argv[2] ?? "all";
+if (!["plugin", "service", "ui", "all"].includes(target)) {
+  console.error(`Unknown target "${target}". Usage: bun scripts/build.ts [plugin|service|ui|all]`);
+  process.exit(1);
+}
 
 async function bundle(entry: string, outfile: string, platform: "node" | "browser") {
   const result = await Bun.build({

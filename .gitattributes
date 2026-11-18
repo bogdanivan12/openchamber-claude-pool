@@ -1,0 +1,5 @@
+* text=auto eol=lf
+plugin/index.js linguist-generated=true -diff
+service/main.js linguist-generated=true -diff
+ui/panel/main.js linguist-generated=true -diff
+ui/status/main.js linguist-generated=true -diff

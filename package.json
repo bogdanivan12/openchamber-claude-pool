@@ -22,7 +22,7 @@
     }
   },
   "scripts": {
-    "test:shared": "bun test shared service ui",
+    "test:shared": "bun test shared service ui scripts",
     "test:plugin": "bun plugin/test/run.ts",
     "test": "bun run test:shared && bun run test:plugin",
     "check": "tsc -p tsconfig.json --noEmit",
