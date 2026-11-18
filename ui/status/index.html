@@ -8,9 +8,12 @@
       #root { padding: 6px 8px; display: flex; gap: 8px; align-items: flex-start; font-size: .9em; }
       .list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
       .row { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px; align-items: center; }
+      .row > :first-child { min-width: 0; max-width: 11em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .row > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .active { font-weight: 600; }
       .muted { opacity: .7; }
       .line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .error-line { white-space: normal; overflow-wrap: anywhere; }
       .error { color: var(--destructive, #d33); opacity: 1; }
       .warning { color: var(--warning, #c80); opacity: 1; }
       .refresh { flex: none; border: 0; background: transparent; color: inherit; font: inherit; opacity: .7; cursor: pointer; padding: 0 2px; }

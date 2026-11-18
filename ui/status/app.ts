@@ -17,6 +17,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = "") 
 };
 
 const line = (text: string, cls = "muted") => el("span", `line ${cls}`, text);
+const MIN_HEIGHT = 24;
 
 function row(a: AccountView, now: number, out: Element[]): void {
   const name = el("span", a.poolActive ? "active" : "", (a.poolActive ? "● " : "") + a.label);
@@ -37,7 +38,6 @@ function row(a: AccountView, now: number, out: Element[]): void {
 export function createStatus(host: StatusHost, root: Element, opts: { now?: () => number } = {}): void {
   const client = api(host);
   const now = opts.now ?? Date.now;
-  let mounted = false;
   let seq = 0;
 
   const body = el("div", "list");
@@ -51,7 +51,8 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
 
   async function reportHeight(): Promise<void> {
     try {
-      await host.setHeight?.(Math.ceil(document.documentElement.scrollHeight));
+      const content = Math.ceil(root.getBoundingClientRect().height);
+      await host.setHeight?.(Math.max(MIN_HEIGHT, content));
     } catch {
       // The host clamps and may refuse; the section works at any height.
     }
@@ -59,6 +60,7 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
 
   async function load(): Promise<void> {
     const mine = ++seq;
+    refresh.disabled = true;
     const children: Element[] = [];
     try {
       const data = await client.list();
@@ -68,17 +70,19 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
       else if (data.accounts.length === 0) children.push(line("No accounts. Open the Claude Pool panel to add one."));
       else for (const a of enabled) row(a, t, children);
     } catch (e) {
-      children.push(line((e as Error).message));
+      const message = (e as Error).message;
+      const l = line(message, "muted error-line");
+      l.title = message;
+      children.push(l);
     }
     if (mine !== seq) return; // a newer refresh is in flight
+    refresh.disabled = false;
     body.replaceChildren(...children);
     await reportHeight();
   }
 
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
-    mounted = true;
     void load();
   });
-  if (!mounted) void load();
 }

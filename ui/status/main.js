@@ -2177,6 +2177,7 @@ var el2 = (tag, cls = "", text = "") => {
   return node;
 };
 var line = (text, cls = "muted") => el2("span", `line ${cls}`, text);
+var MIN_HEIGHT = 24;
 function row(a, now, out) {
   const name = el2("span", a.poolActive ? "active" : "", (a.poolActive ? "● " : "") + a.label);
   const bar = el2("div");
@@ -2197,7 +2198,6 @@ function row(a, now, out) {
 function createStatus(host, root, opts = {}) {
   const client = api(host);
   const now = opts.now ?? Date.now;
-  let mounted = false;
   let seq = 0;
   const body = el2("div", "list");
   const refresh = el2("button", "refresh", "↻");
@@ -2209,11 +2209,13 @@ function createStatus(host, root, opts = {}) {
   body.append(line("Loading…"));
   async function reportHeight() {
     try {
-      await host.setHeight?.(Math.ceil(document.documentElement.scrollHeight));
+      const content = Math.ceil(root.getBoundingClientRect().height);
+      await host.setHeight?.(Math.max(MIN_HEIGHT, content));
     } catch {}
   }
   async function load() {
     const mine = ++seq;
+    refresh.disabled = true;
     const children = [];
     try {
       const data = await client.list();
@@ -2227,20 +2229,21 @@ function createStatus(host, root, opts = {}) {
         for (const a of enabled)
           row(a, t, children);
     } catch (e) {
-      children.push(line(e.message));
+      const message = e.message;
+      const l = line(message, "muted error-line");
+      l.title = message;
+      children.push(l);
     }
     if (mine !== seq)
       return;
+    refresh.disabled = false;
     body.replaceChildren(...children);
     await reportHeight();
   }
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
-    mounted = true;
     load();
   });
-  if (!mounted)
-    load();
 }
 
 // ui/status/main.ts

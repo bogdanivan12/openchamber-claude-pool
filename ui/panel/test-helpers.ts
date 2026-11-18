@@ -155,7 +155,7 @@ export class FakeService {
 export type Mounted = { root: HTMLElement; host: PanelHost; opened: string[]; ready: (directory?: string | null) => void };
 
 /** A fake host. `onReady` calls the listener at once; `ready()` fires it again later. */
-export function makeHost(service: FakeService): { host: PanelHost; opened: string[]; ready: (directory?: string | null) => void; openUrlError: { value: Error | null } } {
+export function makeHost(service: FakeService, opts: { asyncReady?: boolean } = {}): { host: PanelHost; opened: string[]; ready: (directory?: string | null) => void; openUrlError: { value: Error | null } } {
   const opened: string[] = [];
   const openUrlError = { value: null as Error | null };
   let listener: ((c: any) => void) | null = null;
@@ -166,7 +166,12 @@ export function makeHost(service: FakeService): { host: PanelHost; opened: strin
   const host: PanelHost = {
     serviceRequest: (r) => service.serviceRequest(r),
     openUrl: async (u: string) => { if (openUrlError.value) throw openUrlError.value; opened.push(u); },
-    onReady: (cb) => { listener = cb; cb(context("/project/a") as never); return () => {}; },
+    onReady: (cb) => {
+      listener = cb;
+      if (opts.asyncReady) queueMicrotask(() => cb(context("/project/a") as never));
+      else cb(context("/project/a") as never);
+      return () => {};
+    },
   };
   return { host, opened, ready: (d = "/project/a") => listener?.(context(d)), openUrlError };
 }
