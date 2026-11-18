@@ -215,6 +215,19 @@ try {
     assert.ok((readState(dir).accounts.a1a1a1.limitedUntil ?? 0) > Date.now(), "stale limit still marks the account briefly");
   }
   {
+    // (e) the binding is renewed once it is a day old, not before
+    const { dir } = fresh(["a1a1a1", "b2b2b2"]);
+    updateState((st) => {
+      bindConversation(st, "s-old", "a1a1a1", Date.now() - 25 * 3600_000);
+      bindConversation(st, "s-new", "a1a1a1", Date.now() - 3600_000);
+    }, dir);
+    const newAt = readState(dir).conversations["s-new"].at;
+    await handlePoolChat(mk("s-old"), {}, async () => new Response("ok"), dir);
+    await handlePoolChat(mk("s-new"), {}, async () => new Response("ok"), dir);
+    assert.ok(Date.now() - readState(dir).conversations["s-old"].at < 5000, "25 h old binding refreshed");
+    assert.equal(readState(dir).conversations["s-new"].at, newAt, "1 h old binding untouched");
+  }
+  {
     // (d) an unchanged binding is not rewritten
     const { dir } = fresh(["a1a1a1", "b2b2b2"]);
     await handlePoolChat(mk("s-d"), {}, async () => new Response("ok"), dir);

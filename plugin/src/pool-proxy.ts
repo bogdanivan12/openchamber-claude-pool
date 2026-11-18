@@ -40,6 +40,8 @@ export async function limitFromResponse(res: Response): Promise<{ until: number 
 }
 
 const MIN_LIMIT_MS = 5000;
+/** A binding is renewed at most this often; state.ts prunes bindings idle for 30 days. */
+export const BINDING_REFRESH_MS = 24 * 3600 * 1000;
 
 /** The earliest moment any account is available, ignoring which ones were tried; null when none has a known time. */
 export function earliestRetryAt(enabled: Account[], state: PoolState, threshold: number, now: number): number | null {
@@ -142,7 +144,8 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
           log.warn("[claude-pool] transcript migration failed; history will be replayed", err instanceof Error ? err.message : err);
         }
       }
-      if (state.conversations[sessionKey]?.accountId !== account.id) {
+      const binding = state.conversations[sessionKey];
+      if (!binding || binding.accountId !== account.id || now - binding.at > BINDING_REFRESH_MS) {
         updateState((s) => bindConversation(s, sessionKey, account.id, now), dataDir);
       }
     }
