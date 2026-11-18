@@ -74,7 +74,7 @@ import { homedir as homedir4 } from "node:os";
 // plugin/src/executable-path.ts
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readdir as fsReaddir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -180,9 +180,22 @@ async function usableClaudePath(candidate, env) {
     return resolveWindowsClaudePath(candidate);
   return await probeClaudePath(candidate, env) ? candidate : null;
 }
-async function knownClaudeLocations(env) {
+async function defaultNpmPrefix() {
+  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
+  return prefix.failed ? "" : prefix.stdout.trim();
+}
+async function versionedCandidates(root, suffix, readdir) {
+  try {
+    const versions = (await readdir(root)).sort().reverse();
+    return versions.map((version) => join(root, version, ...suffix, "claude"));
+  } catch {
+    return [];
+  }
+}
+async function knownClaudeLocations(env, deps = {}) {
+  const platform = deps.platform ?? process.platform;
   const home = typeof env.HOME === "string" && env.HOME ? env.HOME : homedir();
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     const appData = typeof env.APPDATA === "string" && env.APPDATA ? env.APPDATA : join(home, "AppData", "Roaming");
     return [
       join(home, ".local", "bin", "claude.exe"),
@@ -190,11 +203,12 @@ async function knownClaudeLocations(env) {
       join(appData, "npm", "claude.cmd")
     ];
   }
+  const readdir = deps.readdir ?? ((dir) => fsReaddir(dir));
   const candidates = [join(home, ".local", "bin", "claude")];
-  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
-  const dir = prefix.failed ? "" : prefix.stdout.trim();
+  const dir = await (deps.npmPrefix ?? defaultNpmPrefix)();
   if (dir)
     candidates.push(join(dir, "bin", "claude"));
+  candidates.push(join("/opt/homebrew", "bin", "claude"), join("/usr/local", "bin", "claude"), join(home, ".claude", "local", "claude"), join(home, ".bun", "bin", "claude"), join(home, ".npm-global", "bin", "claude"), join(home, ".volta", "bin", "claude"), ...await versionedCandidates(join(home, ".nvm", "versions", "node"), ["bin"], readdir), ...await versionedCandidates(join(home, ".local", "share", "fnm", "node-versions"), ["installation", "bin"], readdir));
   return candidates;
 }
 async function findBinaryOnPath(name, env = process.env) {
@@ -6077,7 +6091,12 @@ function normalizeDir(p, home = homedir2()) {
     out = out.slice(0, -1);
   return out;
 }
-var isDefaultConfigDir = (dir, home = homedir2()) => normalizeDir(dir, home) === defaultConfigDir(home);
+function sameDir(a, b, home = homedir2(), platform = process.platform) {
+  const x = normalizeDir(a, home);
+  const y = normalizeDir(b, home);
+  return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+var isDefaultConfigDir = (dir, home = homedir2(), platform = process.platform) => sameDir(dir, defaultConfigDir(home), home, platform);
 function keychainService(configDir, home = homedir2()) {
   if (isDefaultConfigDir(configDir, home))
     return "Claude Code-credentials";
@@ -6250,10 +6269,23 @@ function loadLocked(path) {
     return emptyAccounts();
   }
 }
+var TRANSIENT_CODES = new Set(["EBUSY", "EPERM", "EACCES", "EAGAIN"]);
+function readWithRetry(fn, sleep = sleepSync) {
+  for (let attempt = 1;; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const code = err?.code;
+      if (attempt > 3 || typeof code !== "string" || !TRANSIENT_CODES.has(code))
+        throw err;
+      sleep(15 * attempt);
+    }
+  }
+}
 function readAccounts(dataDir = poolDataDir()) {
   const path = accountsFile(dataDir);
   try {
-    return load(path);
+    return readWithRetry(() => load(path));
   } catch (err) {
     if (!(err instanceof CorruptError)) {
       console.warn("[claude-pool] could not read accounts.json:", err.message);
@@ -6284,7 +6316,7 @@ function updateAccounts(mutate, dataDir = poolDataDir()) {
     checkConfigDirs(file);
     for (const a of file.accounts)
       a.configDir = normalizeDir(a.configDir);
-    if (new Set(file.accounts.map((a) => a.configDir)).size !== file.accounts.length) {
+    if (file.accounts.some((a, i) => file.accounts.some((b, j) => i < j && sameDir(a.configDir, b.configDir)))) {
       throw new Error("duplicate configDir");
     }
     const valid = parse4(file);
@@ -6324,24 +6356,38 @@ function parseCredentialBlob(raw) {
     return null;
   }
 }
-async function readCredential(configDir, deps = {}) {
+var errCode = (err) => err?.code;
+async function readCredentialDetailed(configDir, deps = {}) {
   const platform = deps.platform ?? process.platform;
   const home = deps.home ?? homedir3();
   const exec = deps.exec ?? defaultExec;
   const readFile = deps.readFile ?? ((p) => readFileSync2(p, "utf8"));
   const dir = platform === "win32" ? configDir : normalizeDir(configDir, home);
+  let message;
   if (platform === "darwin") {
     try {
       const cred = parseCredentialBlob(await exec("security", ["find-generic-password", "-s", keychainService(dir, home), "-w"]));
       if (cred)
-        return cred;
-    } catch {}
+        return { cred };
+    } catch (err) {
+      const code = errCode(err);
+      if (code !== 44)
+        message = `Keychain access failed (exit ${code ?? "unknown"})`;
+    }
   }
   try {
-    return parseCredentialBlob(readFile(join3(dir, ".credentials.json")));
-  } catch {
-    return null;
+    const cred = parseCredentialBlob(readFile(join3(dir, ".credentials.json")));
+    if (cred)
+      return { cred };
+  } catch (err) {
+    const code = errCode(err);
+    if (code !== "ENOENT")
+      message ??= `credentials file unreadable (${typeof code === "string" ? code : "I/O error"})`;
   }
+  return message === undefined ? { cred: null, reason: "not-found" } : { cred: null, reason: "error", message };
+}
+async function readCredential(configDir, deps = {}) {
+  return (await readCredentialDetailed(configDir, deps)).cred;
 }
 
 // shared/router.ts
@@ -6639,7 +6685,7 @@ function accountRoutes(deps = {}) {
           return bad("configDirs must not contain empty folders");
         const dir = normalizeDir(raw, home);
         try {
-          const taken = (f) => f.accounts.some((a) => normalizeDir(a.configDir, home) === dir);
+          const taken = (f) => f.accounts.some((a) => sameDir(a.configDir, dir, home));
           if (taken(readAccounts(dataDir))) {
             skipped.push({ configDir: dir, reason: "already in the pool" });
             continue;
@@ -7488,11 +7534,15 @@ function parseUsagePayload(payload) {
 async function readAccountUsage(account, deps = {}) {
   const now = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
-  let cred;
+  let read;
   try {
-    cred = await (deps.readCredential ?? readCredential)(account.configDir);
+    read = deps.readCredentialDetailed ? await deps.readCredentialDetailed(account.configDir) : deps.readCredential ? await deps.readCredential(account.configDir).then((cred) => cred ? { cred } : { cred: null, reason: "not-found" }) : await readCredentialDetailed(account.configDir);
   } catch (err) {
     return { ok: false, plan: null, error: `${account.label}: could not read the login (${err instanceof Error ? err.message.slice(0, 200) : "unknown error"})` };
+  }
+  const cred = read.cred;
+  if (!cred && read.reason === "error") {
+    return { ok: false, plan: null, error: `${account.label}: could not read this account's login (${read.message ?? "unknown error"}). If macOS asked for Keychain access, allow it; reload to retry.` };
   }
   if (!cred)
     return { ok: false, needsLogin: true, plan: null, error: `No Claude login found (or the Keychain denied access) for ${account.label}. Sign in again in the Claude Pool panel.` };
@@ -7531,8 +7581,8 @@ async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
   const reads = await Promise.all(accounts.map((a) => readAccountUsage(a, deps)));
   const now = (deps.now ?? Date.now)();
   const out = {};
+  const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
   updateState((s) => {
-    const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
     accounts.forEach((a, i) => {
       const r = reads[i];
       out[a.id] = r;

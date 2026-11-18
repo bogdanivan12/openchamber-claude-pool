@@ -54205,8 +54205,8 @@ XA==
 
 // plugin/src/models.ts
 import { mkdirSync as mkdirSync5, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { dirname as dirname5, join as join5 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+import { dirname as dirname5, join as join6 } from "node:path";
 function model(id, name, limit, resolvedId, efforts = [...EFFORT_LEVELS]) {
   return {
     id,
@@ -54268,8 +54268,8 @@ function setDiscoveredModels(models) {
   return changed;
 }
 function modelCachePath() {
-  const base = process.env.XDG_DATA_HOME || join5(homedir4(), ".local", "share");
-  return join5(base, "opencode-claude", "models.json");
+  const base = process.env.XDG_DATA_HOME || join6(homedir5(), ".local", "share");
+  return join6(base, "opencode-claude", "models.json");
 }
 function readCachedModels() {
   try {
@@ -54352,7 +54352,12 @@ function normalizeDir(p, home = homedir()) {
     out = out.slice(0, -1);
   return out;
 }
-var isDefaultConfigDir = (dir, home = homedir()) => normalizeDir(dir, home) === defaultConfigDir(home);
+function sameDir(a, b, home = homedir(), platform = process.platform) {
+  const x = normalizeDir(a, home);
+  const y = normalizeDir(b, home);
+  return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+}
+var isDefaultConfigDir = (dir, home = homedir(), platform = process.platform) => sameDir(dir, defaultConfigDir(home), home, platform);
 
 // shared/store-io.ts
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
@@ -54515,10 +54520,23 @@ function loadLocked(path) {
     return emptyAccounts();
   }
 }
+var TRANSIENT_CODES = new Set(["EBUSY", "EPERM", "EACCES", "EAGAIN"]);
+function readWithRetry(fn, sleep = sleepSync) {
+  for (let attempt = 1;; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const code = err?.code;
+      if (attempt > 3 || typeof code !== "string" || !TRANSIENT_CODES.has(code))
+        throw err;
+      sleep(15 * attempt);
+    }
+  }
+}
 function readAccounts(dataDir = poolDataDir()) {
   const path = accountsFile(dataDir);
   try {
-    return load(path);
+    return readWithRetry(() => load(path));
   } catch (err) {
     if (!(err instanceof CorruptError)) {
       console.warn("[claude-pool] could not read accounts.json:", err.message);
@@ -54533,13 +54551,29 @@ function readAccounts(dataDir = poolDataDir()) {
   }
 }
 var enabledAccounts = (file) => file.accounts.filter((a) => a.enabled).sort((a, b) => a.order - b.order);
-function findByConfigDir(file, dir) {
-  const wanted = normalizeDir(dir ?? defaultConfigDir());
-  return file.accounts.find((a) => normalizeDir(a.configDir) === wanted);
+function findByConfigDir(file, dir, platform = process.platform) {
+  const wanted = dir ?? defaultConfigDir();
+  return file.accounts.find((a) => sameDir(a.configDir, wanted, undefined, platform));
 }
 
 // plugin/src/index.ts
 init_constants();
+
+// plugin/src/config-dir.ts
+import { homedir as homedir2 } from "node:os";
+import { join as join2 } from "node:path";
+var poolMode = false;
+function setPoolMode(on) {
+  poolMode = on;
+}
+var isPoolMode = () => poolMode;
+function claudeConfigDir(configDir) {
+  if (configDir)
+    return configDir;
+  if (poolMode)
+    return join2(homedir2(), ".claude");
+  return process.env.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude");
+}
 
 // plugin/src/auth-env.ts
 var AUTH_OVERRIDE_ENV_KEYS = Object.freeze([
@@ -54562,9 +54596,9 @@ function buildClaudeCodeChildEnv(baseEnv = process.env) {
 // plugin/src/executable-path.ts
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
-import { access } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { dirname as dirname2, join as join2 } from "node:path";
+import { access, readdir as fsReaddir } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname2, join as join3 } from "node:path";
 var MAX_PROBE_OUTPUT = 64 * 1024;
 function isJsEntrypoint(path) {
   return /\.[cm]?js$/i.test(path);
@@ -54636,8 +54670,8 @@ async function resolveWindowsClaudePath(candidate) {
     return candidate;
   if (!/\.(cmd|bat)$/i.test(candidate))
     return null;
-  const pkg = join2(dirname2(candidate), "node_modules", "@anthropic-ai", "claude-code");
-  for (const target of [join2(pkg, "bin", "claude.exe"), join2(pkg, "cli.js")]) {
+  const pkg = join3(dirname2(candidate), "node_modules", "@anthropic-ai", "claude-code");
+  for (const target of [join3(pkg, "bin", "claude.exe"), join3(pkg, "cli.js")]) {
     if (await isExecutableFile(target))
       return target;
   }
@@ -54648,21 +54682,35 @@ async function usableClaudePath(candidate, env) {
     return resolveWindowsClaudePath(candidate);
   return await probeClaudePath(candidate, env) ? candidate : null;
 }
-async function knownClaudeLocations(env) {
-  const home = typeof env.HOME === "string" && env.HOME ? env.HOME : homedir2();
-  if (process.platform === "win32") {
-    const appData = typeof env.APPDATA === "string" && env.APPDATA ? env.APPDATA : join2(home, "AppData", "Roaming");
+async function defaultNpmPrefix() {
+  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
+  return prefix.failed ? "" : prefix.stdout.trim();
+}
+async function versionedCandidates(root, suffix, readdir) {
+  try {
+    const versions = (await readdir(root)).sort().reverse();
+    return versions.map((version) => join3(root, version, ...suffix, "claude"));
+  } catch {
+    return [];
+  }
+}
+async function knownClaudeLocations(env, deps = {}) {
+  const platform = deps.platform ?? process.platform;
+  const home = typeof env.HOME === "string" && env.HOME ? env.HOME : homedir3();
+  if (platform === "win32") {
+    const appData = typeof env.APPDATA === "string" && env.APPDATA ? env.APPDATA : join3(home, "AppData", "Roaming");
     return [
-      join2(home, ".local", "bin", "claude.exe"),
-      join2(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
-      join2(appData, "npm", "claude.cmd")
+      join3(home, ".local", "bin", "claude.exe"),
+      join3(appData, "npm", "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+      join3(appData, "npm", "claude.cmd")
     ];
   }
-  const candidates = [join2(home, ".local", "bin", "claude")];
-  const prefix = await runCliProbe("npm", ["prefix", "-g"], { timeoutMs: 6000 });
-  const dir = prefix.failed ? "" : prefix.stdout.trim();
+  const readdir = deps.readdir ?? ((dir) => fsReaddir(dir));
+  const candidates = [join3(home, ".local", "bin", "claude")];
+  const dir = await (deps.npmPrefix ?? defaultNpmPrefix)();
   if (dir)
-    candidates.push(join2(dir, "bin", "claude"));
+    candidates.push(join3(dir, "bin", "claude"));
+  candidates.push(join3("/opt/homebrew", "bin", "claude"), join3("/usr/local", "bin", "claude"), join3(home, ".claude", "local", "claude"), join3(home, ".bun", "bin", "claude"), join3(home, ".npm-global", "bin", "claude"), join3(home, ".volta", "bin", "claude"), ...await versionedCandidates(join3(home, ".nvm", "versions", "node"), ["bin"], readdir), ...await versionedCandidates(join3(home, ".local", "share", "fnm", "node-versions"), ["installation", "bin"], readdir));
   return candidates;
 }
 async function findBinaryOnPath(name, env = process.env) {
@@ -54735,15 +54783,15 @@ init_constants();
 
 // plugin/src/log.ts
 import { appendFileSync, mkdirSync as mkdirSync2 } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
-import { homedir as homedir3 } from "node:os";
+import { dirname as dirname3, join as join4 } from "node:path";
+import { homedir as homedir4 } from "node:os";
 function debugEnabled() {
   const value = (process.env.OPENCODE_CLAUDE_DEBUG ?? "").toLowerCase();
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 function logFilePath() {
-  const base = process.env.XDG_DATA_HOME || join3(homedir3(), ".local", "share");
-  return join3(base, "opencode-claude", "debug.log");
+  const base = process.env.XDG_DATA_HOME || join4(homedir4(), ".local", "share");
+  return join4(base, "opencode-claude", "debug.log");
 }
 function formatArg(arg) {
   if (typeof arg === "string")
@@ -55239,13 +55287,17 @@ async function probeClaudeAuthStatusCli(options) {
 }
 var SUBSCRIPTION_CHECK_TTL_MS = 60000;
 var subscriptionChecks = new Map;
+function withoutConfigDir(env) {
+  const { CLAUDE_CONFIG_DIR: _ignored, ...rest } = env;
+  return rest;
+}
 var defaultAuthStatusProbe = async (configDir) => {
   const binaryPath = await resolveClaudeCli(process.env);
   if (!binaryPath)
     return null;
   return probeClaudeAuthStatusCli({
     binaryPath,
-    env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : undefined
+    env: configDir ? { ...process.env, CLAUDE_CONFIG_DIR: configDir } : isPoolMode() ? withoutConfigDir(process.env) : undefined
   });
 };
 var authStatusProbe = defaultAuthStatusProbe;
@@ -55523,13 +55575,6 @@ function openCodeToolName(mcpName) {
 import { readFileSync as readFileSync4, realpathSync as realpathSync2 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
 import { dirname as dirname6, isAbsolute as isAbsolute3, join as join7, parse as parse8 } from "node:path";
-
-// plugin/src/config-dir.ts
-import { homedir as homedir5 } from "node:os";
-import { join as join6 } from "node:path";
-function claudeConfigDir(configDir) {
-  return configDir || process.env.CLAUDE_CONFIG_DIR || join6(homedir5(), ".claude");
-}
 
 // plugin/src/prompt.ts
 import { createHash } from "node:crypto";
@@ -56603,13 +56648,15 @@ function recordRateLimitInfo(info, configDir) {
   const raw = info;
   const prev = readState(configDir) ?? { limited: false, updatedAt: 0 };
   const resetsAtSec = asNumber(raw.resetsAt);
+  const eventType = asString(raw.rateLimitType);
+  const windowChanged = eventType !== undefined && eventType !== prev.rateLimitType;
   const next = {
     ...prev,
     status: asString(raw.status) ?? prev.status,
     rateLimitType: asString(raw.rateLimitType) ?? prev.rateLimitType,
     utilization: asNumber(raw.utilization),
     overageDisabled: typeof raw.overageDisabledReason === "string" && raw.overageDisabledReason.length > 0 ? true : prev.overageDisabled,
-    resetsAt: resetsAtSec !== undefined ? resetsAtSec > 1000000000000 ? resetsAtSec : resetsAtSec * 1000 : prev.resetsAt,
+    resetsAt: resetsAtSec !== undefined ? resetsAtSec > 1000000000000 ? resetsAtSec : resetsAtSec * 1000 : windowChanged ? undefined : prev.resetsAt,
     updatedAt: Date.now()
   };
   if (next.status === "allowed" || next.status === "allowed_warning") {
@@ -57634,7 +57681,7 @@ function migrateTranscript(sessionId, fromDir, toDir) {
     const dest = join10(toDir, "projects", rel);
     if (!(existsSync6(dest) && statSync3(dest).mtimeMs >= statSync3(src).mtimeMs)) {
       mkdirSync8(dirname9(dest), { recursive: true });
-      const tmp = `${dest}.tmp`;
+      const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`;
       try {
         cpSync(src, tmp, { preserveTimestamps: true });
         renameSync4(tmp, dest);
@@ -58491,6 +58538,8 @@ async function startNewTurn(input) {
   const configDir = requestConfigDir(req);
   if (configDir)
     env.CLAUDE_CONFIG_DIR = configDir;
+  else if (isPoolMode())
+    delete env.CLAUDE_CONFIG_DIR;
   const requestTools = Array.isArray(body.tools) ? body.tools : [];
   const openCodeTools = summaryResume?.profile?.tools ?? requestTools;
   const isMetaRequest = metaKind !== null;
@@ -60087,6 +60136,7 @@ var ClaudeCodePlugin = {
     if (ctx.options?.debug === true) {
       process.env.OPENCODE_CLAUDE_DEBUG ??= "1";
     }
+    setPoolMode(true);
     const directory = ctx.location.directory;
     try {
       await acquireProxy();
