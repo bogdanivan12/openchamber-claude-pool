@@ -1,7 +1,7 @@
 import { enabledAccounts, readAccounts, type Account } from "../../shared/accounts.ts";
 import { defaultConfigDir, isDefaultConfigDir, poolDataDir } from "../../shared/paths.ts";
 import { route } from "../../shared/router.ts";
-import { bindConversation, markLimited, readState, updateState } from "../../shared/state.ts";
+import { bindConversation, markLimited, readState, updateState, type PoolState } from "../../shared/state.ts";
 import { findBridgeByConversation } from "./bridge-pool.js";
 import { ACCOUNT_HEADER, CONFIG_DIR_HEADER, KIND_HEADER, SESSION_HEADER } from "./constants.js";
 import { log } from "./log.js";
@@ -32,11 +32,33 @@ export async function limitFromResponse(res: Response): Promise<{ until: number 
     const until = Number.isFinite(resetsAt)
       ? resetsAt
       : Date.now() + (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 600_000);
-    return { until };
+    // A stale reset still marks the account limited for a moment, so the loop cannot re-pick it at once.
+    return { until: Math.max(until, Date.now() + MIN_LIMIT_MS) };
   } catch {
     return null;
   }
 }
+
+const MIN_LIMIT_MS = 5000;
+
+/** The earliest moment any account is available, ignoring which ones were tried; null when none has a known time. */
+export function earliestRetryAt(enabled: Account[], state: PoolState, threshold: number, now: number): number | null {
+  const all = route({ accounts: enabled, state, threshold, now });
+  return all.kind === "none" ? all.retryAt : null;
+}
+
+const generalLimitResponse = () =>
+  Response.json(
+    {
+      error: {
+        message: "Every Claude Pool account reported a limit just now. Try again shortly.",
+        type: "rate_limit_error",
+        code: "claude_session_limit",
+        retry_after: 5,
+      },
+    },
+    { status: 429, headers: { "Retry-After": "5" } },
+  );
 
 export function poolLimitResponse(retryAt: number | null): Response {
   const seconds = retryAt === null ? 600 : Math.max(1, Math.round((retryAt - Date.now()) / 1000));
@@ -104,8 +126,12 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
 
   for (let attempt = 0; attempt < enabled.length; attempt++) {
     const now = Date.now();
-    const choice = route({ accounts: enabled, state: readState(dataDir), threshold: file.threshold, now, current: previous?.id, exclude: tried });
-    if (choice.kind === "none") return poolLimitResponse(choice.retryAt);
+    const state = readState(dataDir);
+    const choice = route({ accounts: enabled, state, threshold: file.threshold, now, current: previous?.id, exclude: tried });
+    if (choice.kind === "none") {
+      if (tried.size === 0) return poolLimitResponse(choice.retryAt);
+      return exhausted(enabled, state, file.threshold);
+    }
     const account = choice.account;
 
     if (sessionKey && primary) {
@@ -116,7 +142,9 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
           log.warn("[claude-pool] transcript migration failed; history will be replayed", err instanceof Error ? err.message : err);
         }
       }
-      updateState((s) => bindConversation(s, sessionKey, account.id, now), dataDir);
+      if (state.conversations[sessionKey]?.accountId !== account.id) {
+        updateState((s) => bindConversation(s, sessionKey, account.id, now), dataDir);
+      }
     }
 
     const res = await handle(withAccountDir(req, account.configDir), body);
@@ -128,7 +156,13 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
     tried.add(account.id);
     previous = account;
   }
-  const state = readState(dataDir);
-  const route2 = route({ accounts: enabled, state, threshold: file.threshold, now: Date.now() });
-  return poolLimitResponse(route2.kind === "none" ? route2.retryAt : null);
+  return exhausted(enabled, readState(dataDir), file.threshold);
+}
+
+/** Every account was tried or is unavailable: answer with the earliest moment any frees up. */
+function exhausted(enabled: Account[], state: PoolState, threshold: number): Response {
+  const at = earliestRetryAt(enabled, state, threshold, Date.now());
+  // null with accounts still routable means every attempt failed with an odd 429, not that they are signed out.
+  if (at === null && route({ accounts: enabled, state, threshold, now: Date.now() }).kind === "account") return generalLimitResponse();
+  return poolLimitResponse(at);
 }

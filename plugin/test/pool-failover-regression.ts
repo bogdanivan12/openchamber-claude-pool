@@ -157,6 +157,72 @@ try {
   assert.deepEqual(hooks, [["s-title", B_DIR, C_DIR]]);
   assert.equal(readState(home).conversations["s-title"].accountId, "cccccc");
   setMigrationHook(null);
+
+  // 11. retryAt covers the accounts that were just tried
+  const { setNeedsLogin } = await import("../../shared/state.ts");
+  const fresh = (ids: string[]) => {
+    const dir = mkdtempSync(join(tmpdir(), "pool-fresh-"));
+    const dirs: Record<string, string> = {};
+    updateAccounts((f) => {
+      ids.forEach((id, i) => {
+        dirs[id] = join(dir, id);
+        f.accounts.push({ id, label: id, configDir: dirs[id], order: i, enabled: true });
+      });
+    }, dir);
+    return { dir, dirs };
+  };
+  const limit429 = (resetsAt: number) =>
+    Response.json({ error: { code: "claude_session_limit", resets_at: new Date(resetsAt).toISOString(), retry_after: 1 } }, { status: 429 });
+  const byDir = (map: Record<string, number>, hits: string[]) => async (r: Request) => {
+    const d = decodeURIComponent(r.headers.get("x-opencode-claude-config-dir") ?? "");
+    hits.push(d);
+    return map[d] !== undefined ? limit429(map[d]) : new Response("ok");
+  };
+  const near = (res: Response, seconds: number, slack = 5) =>
+    Math.abs(Number(res.headers.get("retry-after")) - seconds) <= slack;
+
+  {
+    // (a) A limited and tried, B signed out: earliest is A's reset, not the 600 s fallback
+    const { dir, dirs } = fresh(["a1a1a1", "b2b2b2"]);
+    updateState((st) => setNeedsLogin(st, "b2b2b2", true), dir);
+    const r = await handlePoolChat(mk("s-a"), {}, byDir({ [dirs.a1a1a1]: Date.now() + 3600_000 }, []), dir);
+    assert.equal(r.status, 429);
+    assert.ok(near(r, 3600), `retry-after ${r.headers.get("retry-after")} should be about 3600`);
+  }
+  {
+    // (b) A +1h and B +5h tried, C limited +3h already: earliest is A
+    const { dir, dirs } = fresh(["a1a1a1", "b2b2b2", "c3c3c3"]);
+    updateState((st) => markLimited(st, "c3c3c3", Date.now() + 3 * 3600_000), dir);
+    const r = await handlePoolChat(
+      mk("s-b"), {},
+      byDir({ [dirs.a1a1a1]: Date.now() + 3600_000, [dirs.b2b2b2]: Date.now() + 5 * 3600_000 }, []),
+      dir,
+    );
+    assert.equal(r.status, 429);
+    assert.ok(near(r, 3600), `retry-after ${r.headers.get("retry-after")} should be about 3600`);
+  }
+  {
+    // (c) stale 429s everywhere: floored, bounded tries, short Retry-After, never the 600 s message
+    const { dir, dirs } = fresh(["a1a1a1", "b2b2b2"]);
+    const hits: string[] = [];
+    const stale = Date.now() - 3600_000;
+    const r = await handlePoolChat(mk("s-c"), {}, byDir({ [dirs.a1a1a1]: stale, [dirs.b2b2b2]: stale }, hits), dir);
+    assert.equal(r.status, 429);
+    assert.equal(hits.length, 2, "one try per account");
+    const ra = Number(r.headers.get("retry-after"));
+    assert.ok(ra >= 4 && ra <= 5, `retry-after ${ra}`);
+    assert.equal((await r.json()).error.code, "claude_session_limit");
+    assert.ok((readState(dir).accounts.a1a1a1.limitedUntil ?? 0) > Date.now(), "stale limit still marks the account briefly");
+  }
+  {
+    // (d) an unchanged binding is not rewritten
+    const { dir } = fresh(["a1a1a1", "b2b2b2"]);
+    await handlePoolChat(mk("s-d"), {}, async () => new Response("ok"), dir);
+    const first = readState(dir).conversations["s-d"].at;
+    await new Promise((r) => setTimeout(r, 25));
+    await handlePoolChat(mk("s-d"), {}, async () => new Response("ok"), dir);
+    assert.equal(readState(dir).conversations["s-d"].at, first);
+  }
 } finally {
   proxy.setClaudeQueryStarter(null);
   await proxy.stopProxy();
