@@ -1,6 +1,6 @@
 # Claude Pool plugin (fork of opencode-claude)
 
-> This folder is the Claude Pool fork of opencode-claude, bundled into the extension; see the root README. The sign-in integration and the `configDirs` option described below were removed in the fork; providers are `claude-pool*`.
+> This folder is the Claude Pool fork of opencode-claude, bundled into the extension; see the root README. The sign-in integration and the `configDirs` option were removed in the fork; providers are `claude-pool*`.
 
 Upstream: [openchamber/opencode-claude](https://github.com/openchamber/opencode-claude) (MIT). Every request runs through the official [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) on top of the `claude` CLI installed on your machine. The plugin makes no calls to Anthropic itself and never writes or refreshes your Claude credentials.
 
@@ -28,6 +28,8 @@ Tools stay OpenCode's. Claude Code's built-in tools (its own Bash, Edit and so o
 Each OpenCode chat maps to one Claude Code session and resumes it on every message. That keeps Anthropic's prompt cache warm, which is what makes long sessions affordable on a plan.
 
 ## Notes
+
+Model-specific notes inherited from upstream (for example fast variants and effort levels) describe the underlying Claude Code CLI behaviour and were not re-verified for the pool providers.
 
 **Fast mode.** Models your CLI runs in [fast mode](https://code.claude.com/docs/en/fast-mode) get a second entry, like "Opus 5.5 Fast". Fast turns draw your plan limits faster. If your account can't use fast mode, the turn runs at normal speed and the log says why.
 

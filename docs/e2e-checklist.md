@@ -6,14 +6,14 @@ Prep: OpenChamber running; Settings → Extensions → Add, the absolute path of
 
 ## A. Install and accounts
 
-- [ ] **A1** Approve the permissions (Run a local service, Add a plugin to OpenCode, Reports usage). Settings → Plugins lists `claude-pool` as active within seconds. Pass ☐ Fail ☐
+- [ ] **A1** Approve the permissions (paraphrased: run a local service, add a plugin to OpenCode, report usage; the dialog may word them differently and should list the programs `claude` and `security`). Settings → Plugins (menu name from the plan; not yet confirmed in OpenChamber) lists `claude-pool` as active within seconds. Pass ☐ Fail ☐
 - [ ] **A2** Before any account exists, the model picker shows no Claude Pool providers. Pass ☐ Fail ☐
 - [ ] **A3** Panel → Import: `~/.claude` and `~/.claude-b` are offered; import both. Each shows its email and plan. Pass ☐ Fail ☐
 - [ ] **A4** Model picker shows `Claude Pool` and `Claude · <name>` for each account. Pass ☐ Fail ☐
 - [ ] **A5** Import again: nothing left to offer (the "Nothing to import" note appears). Pass ☐ Fail ☐
 - [ ] **A6** Panel → Add account with a new name, finish with the code from the Claude page: the account appears with email and plan; its folder exists in `~/.claude-pool/accounts/`. Pass ☐ Fail ☐
 - [ ] **A7** Add account with a name that is already used: an error is shown, nothing starts. Pass ☐ Fail ☐
-- [ ] **A8** New sign-in with a WRONG code: the sign-in starts over (new page and code prompt or a failed screen with Back); no half-created account appears in the list and no leftover folder remains in `~/.claude-pool/accounts/`. Pass ☐ Fail ☐
+- [ ] **A8** New sign-in with a WRONG code: a "Sign-in failed" banner with a Back button appears. After Back the list has no new account and no `~/.claude-pool/accounts/<id>` folder remains for it. Anything else is a Fail. Pass ☐ Fail ☐
 - [ ] **A9** Start a new sign-in and reload the panel while the code screen is open: the code screen comes back (resumes). Finish with the right code. Pass ☐ Fail ☐
 - [ ] **A10** Submit a code and reload the panel while it says verifying: the panel resumes and ends on the list. Pass ☐ Fail ☐
 - [ ] **A11** Sign in with an account that is already in the pool (new name): the duplicate warning appears; "Remove the duplicate" removes the new entry and the original is untouched (still listed, still works). Pass ☐ Fail ☐
@@ -31,7 +31,7 @@ Prep: OpenChamber running; Settings → Extensions → Add, the absolute path of
 
 - [ ] **B1** Send one message with `Claude · <account 2>`. On claude.ai (account 2) usage rose; account 1 unchanged. Pass ☐ Fail ☐
 - [ ] **B2** Send one message with `Claude · <account 1>`. Account 1 rose; account 2 unchanged. Pass ☐ Fail ☐
-- [ ] **B3** Settings → Usage: the Claude Pool card shows both the 5h and 7d windows on top (labelled with the pool account's name) and a group per account with both windows. The built-in Claude card can be hidden there. Pass ☐ Fail ☐
+- [ ] **B3** Settings → Usage: the Claude Pool card shows both the 5h and 7d windows on top (labelled with the pool account's name) and a group per enabled account that has usage data, with both windows. The built-in Claude card can be hidden there (menu name from the plan; not yet confirmed in OpenChamber). Pass ☐ Fail ☐
 - [ ] **B4** Work Status shows the Claude Pool section with a row per enabled account (5h bar and both percentages). A long account name is truncated (try renaming one to 40 characters), the frame height fits the rows, and ↻ refreshes. Pass ☐ Fail ☐
 - [ ] **B5** Sign out an account's login on purpose (or break it) and refresh: its group shows "(sign in again)" and the panel offers "Sign in again". Pass ☐ Fail ☐ Skipped ☐
 
@@ -45,7 +45,7 @@ Prep: OpenChamber running; Settings → Extensions → Add, the absolute path of
 
 ## D. Service and processes
 
-- [ ] **D1** Stop and restart the OpenChamber service (or restart OpenChamber): the panel keeps working after it comes back. Pass ☐ Fail ☐
+- [ ] **D1** Stop the service: in Settings → Extensions, disable and re-enable the Claude Pool extension (menu name from the plan; not yet confirmed), or quit and reopen OpenChamber. Afterwards: the panel lists the same accounts, Refresh works, the usage card and Work Status fill in again, and a new message on a Claude Pool provider still runs. Pass ☐ Fail ☐
 - [ ] **D2** Quit OpenChamber: no `claude-pool` service process remains (`ps aux | grep service/main.js`). Pass ☐ Fail ☐
 
 ## E. Windows (for whoever can run it)

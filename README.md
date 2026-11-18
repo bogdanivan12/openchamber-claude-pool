@@ -1,6 +1,6 @@
 # Claude Pool
 
-An [OpenChamber](https://github.com/openchamber/openchamber) extension that lets you use several Claude subscriptions (Pro or Max) at once. It adds a failover **pool** provider, one provider per account, a panel to add and manage accounts, a usage card with a group per account, and a Work Status section with a 5h bar per account.
+An [OpenChamber](https://github.com/openchamber/openchamber) extension that lets you use several Claude subscriptions (Pro or Max) at once. It adds a failover **pool** provider, one provider per account, a panel to add and manage accounts, a usage card with a group per account, and a Work Status section with a 5h bar per enabled account.
 
 Status: 0.1.0, not yet published.
 
@@ -16,7 +16,7 @@ Status: 0.1.0, not yet published.
 
 **From git, once the repository is published.** The intended location is `https://github.com/bogdanivan12/openchamber-claude-pool.git` (it does not exist yet). Settings → Extensions → Add, then paste that URL.
 
-Approve the permissions the extension asks for:
+Approve the permissions the extension asks for. The capability names below are paraphrased from the plan; OpenChamber's approval dialog may word them differently. It should also list the programs the service may run (`claude` and `security`, from `service.permissions.exec` in `package.json`). A local service runs with your user's full access, so only approve it if you trust this code.
 
 - Run a local service
 - Add a plugin to OpenCode
@@ -27,7 +27,7 @@ Approve the permissions the extension asks for:
 Open the **Claude Pool** panel.
 
 - **Import**: lists the existing Claude Code logins on this computer (`~/.claude` and `~/.claude-*`). Tick the ones you want and import them. Logins that are not a Claude subscription, or are already in the pool, are skipped with a reason.
-- **Add account**: type a name (names must be unique), press Start, sign in on the Claude page that opens, and paste the code it shows. A wrong code on a new account starts the sign-in over. A wrong code for an existing account ("Sign in again") leaves that account untouched. New accounts get their own folder in `~/.claude-pool/accounts/<id>`.
+- **Add account**: type a name (names must be unique), press Start, sign in on the Claude page that opens, and paste the code it shows. A wrong code on a new account cancels that sign-in: the panel shows a "Sign-in failed" banner with a Back button, the half-created account and its folder are discarded, and you press "Add account" again to retry. A wrong code for an existing account ("Sign in again") leaves that account untouched. New accounts get their own folder in `~/.claude-pool/accounts/<id>`.
 
 Other panel actions: turn an account on or off ("In pool"), rename, reorder (↑ ↓) and remove. Removing never deletes a login folder unless you tick "Also sign out and delete this account's folder", and that box only appears for folders the pool created. For those, `claude auth logout` is run before the folder is deleted. Folders you imported are never deleted.
 
@@ -43,11 +43,11 @@ How the pool behaves:
 - A conversation sticks to its account until that account passes the threshold or hits a limit. The threshold applies to the 5h and the 7-day window and defaults to 90%. Set it between 50 and 100 in the panel.
 - Then the conversation moves to the account with the most headroom. If the account refuses a turn with a limit before any output was streamed, the turn is retried automatically on the next account.
 - On a move, the Claude session transcript is copied to the new account's folder so the conversation keeps its context. The first turn after a move has a cold prompt cache, so it reads (and bills) the whole context again.
-- If every account is at its limit, the proxy answers 429 with the earliest reset time.
+- If no account is available, the proxy answers 429. That happens when every account is at a hard limit or over the threshold, not only at a hard limit. The message names the earliest time one frees up. When no reset time is known, it says the accounts are limited or signed out, and the retry-after is 10 minutes.
 
 ## The usage card and Work Status
 
-Settings → Usage shows one **Claude Pool** card: on top the 5h and 7d windows of the account the pool would use now (labelled with its name), then a group per account. A group says "(sign in again)" for an account that needs a new login, "(limited)" while it is at a limit, and "(data N min old)" when its numbers could not be refreshed. The built-in Claude card keeps showing the default Claude Code account; you can hide it in Settings → Usage.
+Settings → Usage (menu name from the plan; not yet confirmed in OpenChamber) shows one **Claude Pool** card: on top the 5h and 7d windows of the account the pool would use now (labelled with its name), then a group per enabled account that has usage data. A group says "(sign in again)" for an account that needs a new login, "(limited)" while it is at a limit, and "(data N min old)" when its numbers could not be refreshed. The built-in Claude card keeps showing the default Claude Code account; you can hide it in Settings → Usage (menu name from the plan; not yet confirmed in OpenChamber).
 
 The Work Status section "Claude Pool" has one row per enabled account with a 5h bar, a ● marker on the account the pool would use now, and a ↻ button to refresh.
 
@@ -96,4 +96,4 @@ Layout:
 
 ## Credits and license
 
-MIT. Built on [openchamber/opencode-claude](https://github.com/openchamber/opencode-claude) (MIT, copyright lines kept in `LICENSE` and `plugin/LICENSE`) and the OpenChamber extension SDK.
+MIT. Built on [openchamber/opencode-claude](https://github.com/openchamber/opencode-claude) (MIT, copyright lines kept in `LICENSE` and `plugin/LICENSE`; upstream: "Copyright (c) 2026 Otto Assistant contributors") and the OpenChamber extension SDK.
