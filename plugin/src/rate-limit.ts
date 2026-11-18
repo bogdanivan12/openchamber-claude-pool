@@ -79,19 +79,20 @@ function readState(configDir?: string): ClaudeRateLimitState | null {
   }
 }
 
-type RateLimitListener = (configDir: string | undefined, state: ClaudeRateLimitState) => void;
+export type RateLimitWriteSource = "event" | "error" | "heal";
+type RateLimitListener = (configDir: string | undefined, state: ClaudeRateLimitState, source: RateLimitWriteSource) => void;
 let rateLimitListener: RateLimitListener | null = null;
 export function setRateLimitListener(fn: RateLimitListener | null): void {
   rateLimitListener = fn;
 }
 
-function writeState(state: ClaudeRateLimitState, configDir?: string): void {
+function writeState(state: ClaudeRateLimitState, configDir: string | undefined, source: RateLimitWriteSource): void {
   try {
     const path = storePath(configDir);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(state, null, 2) + "\n", "utf8");
     try {
-      rateLimitListener?.(configDir, state);
+      rateLimitListener?.(configDir, state, source);
     } catch {
       // the pool bridge must never break the proxy
     }
@@ -151,7 +152,7 @@ export function recordRateLimitInfo(
     next.limited = false;
     delete next.limitedUntil;
   }
-  writeState(next, configDir);
+  writeState(next, configDir, "event");
   return next;
 }
 
@@ -365,7 +366,7 @@ export function recordRateLimitErrorText(
     message: text.trim().slice(0, 300),
     updatedAt: now,
   };
-  writeState(next, configDir);
+  writeState(next, configDir, "error");
   return next;
 }
 
@@ -416,7 +417,7 @@ export function getRateLimitSnapshot(
   let { limited, limitedUntil } = state;
   if (limited && limitedUntil !== undefined && now >= limitedUntil) {
     limited = false;
-    writeState({ ...state, limited: false, updatedAt: now }, configDir);
+    writeState({ ...state, limited: false, updatedAt: now }, configDir, "heal");
   }
   const resetsAt = state.resetsAt;
   const resetInSeconds =

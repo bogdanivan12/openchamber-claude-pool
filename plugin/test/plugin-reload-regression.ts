@@ -20,7 +20,7 @@ const repo = join(import.meta.dir, "..");
 async function loadCopy(root: string, name: string) {
   const dir = join(root, name);
   // src modules import ../../shared; give each copy the sibling the real layout has.
-  if (!existsSync(join(root, "shared"))) symlinkSync(join(repo, "..", "shared"), join(root, "shared"));
+  if (!existsSync(join(root, "shared"))) symlinkSync(join(repo, "..", "shared"), join(root, "shared"), process.platform === "win32" ? "junction" : "dir");
   cpSync(join(repo, "src"), join(dir, "src"), { recursive: true });
   symlinkSync(join(repo, "node_modules"), join(dir, "node_modules"));
   const { setAuthStatusProbe } = await import(join(dir, "src", "detect.ts"));
