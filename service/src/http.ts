@@ -27,9 +27,10 @@ export function createServer(routes: Record<string, Route>, token: string): http
       res.end(JSON.stringify(body));
     };
     if (req.headers.authorization !== `Bearer ${token}`) return send(401, { error: "unauthorized" });
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    let url: URL;
     let found: ReturnType<typeof match>;
     try {
+      url = new URL(req.url ?? "/", "http://127.0.0.1");
       found = match(routes, req.method ?? "GET", url.pathname);
     } catch {
       return send(400, { error: "bad-request" });

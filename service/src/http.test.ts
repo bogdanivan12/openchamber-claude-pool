@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { createServer } from "./http.ts";
 import { routes } from "./routes.ts";
 
@@ -11,6 +11,7 @@ const server = createServer(
     },
     "POST /json": (r) => ({ status: 200, body: JSON.parse(r.body) }),
     "POST /echo": (r) => ({ status: 200, body: { length: r.body.length } }),
+    "DELETE /api/accounts/:id": (r) => ({ status: 200, body: { id: r.query.get("id") } }),
     "GET /x/:id": (r) => ({ status: 200, body: { id: r.query.get("id") } }),
   },
   "t",
@@ -41,5 +42,24 @@ describe("service http hardening", () => {
     expect(await ok.json()).toEqual({ length: 1024 * 1024 });
     const big = await fetch(`${base()}/echo`, { method: "POST", headers: auth, body: "a".repeat(1024 * 1024 + 1) });
     expect(big.status).toBe(413);
+  });
+  it("a malformed request target is 400 and the server keeps serving", async () => {
+    const port = (server.address() as AddressInfo).port;
+    const raw = await new Promise<string>((resolve, reject) => {
+      const sock = connect(port, "127.0.0.1", () => sock.write("GET // HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer t\r\nConnection: close\r\n\r\n"));
+      let data = "";
+      sock.on("data", (c) => (data += c));
+      sock.on("end", () => resolve(data));
+      sock.on("error", reject);
+    });
+    expect(raw.startsWith("HTTP/1.1 400")).toBe(true);
+    expect((await fetch(`${base()}/health`, { headers: auth })).status).toBe(200);
+  });
+  it("an unauthenticated request to an unknown path is 401, not 404", async () => {
+    expect((await fetch(`${base()}/nope`)).status).toBe(401);
+  });
+  it("a path param wins over a same-named query param", async () => {
+    const res = await fetch(`${base()}/api/accounts/abc?id=other`, { method: "DELETE", headers: auth });
+    expect(await res.json()).toEqual({ id: "abc" });
   });
 });
