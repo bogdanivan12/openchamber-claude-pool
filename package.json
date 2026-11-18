@@ -24,6 +24,7 @@
   "scripts": {
     "test:shared": "bun test shared service ui scripts",
     "test:plugin": "bun plugin/test/run.ts",
+    "test:plugin:windows": "bun plugin/test/run.ts --only pool-,bundle-load,windows-cli",
     "test": "bun run test:shared && bun run test:plugin",
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "bun scripts/build.ts",

@@ -28,7 +28,13 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run test:shared
+      # The fork's plugin tests build fake `claude` shell scripts (#!/bin/sh + chmod) and use
+      # POSIX symlinks, so the full suite runs on macOS only; Windows runs the pool-specific
+      # tests, the bundle load check and the Windows CLI test.
       - run: bun run test:plugin
+        if: runner.os == 'macOS'
+      - run: bun run test:plugin:windows
+        if: runner.os == 'Windows'
       - run: bun run check:bundles
         if: runner.os == 'macOS'
       - run: bunx openchamber-guest-check .

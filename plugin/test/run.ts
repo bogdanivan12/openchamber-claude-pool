@@ -3,18 +3,32 @@
  * own process (they set process-wide env and proxy state). Live tests
  * (haiku-live.ts) are excluded — they need a signed-in Claude CLI.
  *
- * Run: bun test/run.ts
+ * Run: bun test/run.ts [--only <comma-separated file name prefixes>]
  */
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const dir = import.meta.dir;
-const files = [
+const all = [
   "smoke.ts",
   ...readdirSync(dir)
     .filter((name) => name.endsWith("-regression.ts"))
     .sort(),
 ];
+
+const onlyIndex = process.argv.indexOf("--only");
+let files = all;
+if (onlyIndex !== -1) {
+  const prefixes = (process.argv[onlyIndex + 1] ?? "")
+    .split(",")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  files = all.filter((name) => prefixes.some((p) => name.startsWith(p)));
+  if (prefixes.length === 0 || files.length === 0) {
+    console.error(`--only ${prefixes.join(",") || "(empty)"} matches no test file. Available: ${all.join(", ")}`);
+    process.exit(1);
+  }
+}
 
 let failed = 0;
 for (const file of files) {
