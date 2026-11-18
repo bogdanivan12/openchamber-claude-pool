@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_THRESHOLD, emptyAccounts, enabledAccounts, findByConfigDir,
-  newAccountId, readAccounts, updateAccounts,
+  newAccountId, readAccounts, readWithRetry, updateAccounts,
 } from "./accounts.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "pool-acc-"));
@@ -130,5 +130,26 @@ describe("accounts", () => {
       f.accounts.push({ id: "abcdef", label: "x", configDir: "~/.claude-t", order: 0, enabled: true });
     }, d);
     expect(readAccounts(d).accounts[0].configDir).toBe(join(homedir(), ".claude-t"));
+  });
+
+  it("readWithRetry retries transient I/O errors and then succeeds", () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const out = readWithRetry(() => {
+      if (++calls < 3) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      return "ok";
+    }, (ms) => sleeps.push(ms));
+    expect(out).toBe("ok");
+    expect(calls).toBe(3);
+    expect(sleeps).toEqual([15, 30]);
+  });
+
+  it("readWithRetry gives up after 3 attempts and never retries other errors", () => {
+    let calls = 0;
+    expect(() => readWithRetry(() => { calls++; throw Object.assign(new Error("perm"), { code: "EPERM" }); }, () => {})).toThrow("perm");
+    expect(calls).toBe(4);
+    calls = 0;
+    expect(() => readWithRetry(() => { calls++; throw Object.assign(new Error("x"), { code: "EISDIR" }); }, () => {})).toThrow("x");
+    expect(calls).toBe(1);
   });
 });

@@ -3,7 +3,7 @@ import { existsSync, renameSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { accountsFile, defaultConfigDir, lockFile, normalizeDir, poolDataDir } from "./paths.ts";
-import { readJsonFile, withLock, writeJsonAtomic } from "./store-io.ts";
+import { readJsonFile, sleepSync, withLock, writeJsonAtomic } from "./store-io.ts";
 
 export const DEFAULT_THRESHOLD = 90;
 export const MIN_THRESHOLD = 50;
@@ -75,10 +75,28 @@ function loadLocked(path: string): AccountsFile {
   }
 }
 
+const TRANSIENT_CODES = new Set(["EBUSY", "EPERM", "EACCES", "EAGAIN"]);
+
+/**
+ * Windows can fail a read for a moment while another process renames the file
+ * into place. Retries up to 3 times (15 ms, 30 ms, 45 ms) before rethrowing.
+ */
+export function readWithRetry<T>(fn: () => T, sleep: (ms: number) => void = sleepSync): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (attempt > 3 || typeof code !== "string" || !TRANSIENT_CODES.has(code)) throw err;
+      sleep(15 * attempt);
+    }
+  }
+}
+
 export function readAccounts(dataDir: string = poolDataDir()): AccountsFile {
   const path = accountsFile(dataDir);
   try {
-    return load(path);
+    return readWithRetry(() => load(path));
   } catch (err) {
     if (!(err instanceof CorruptError)) {
       console.warn("[claude-pool] could not read accounts.json:", (err as Error).message);
