@@ -1,7 +1,7 @@
 import type { Account } from "../../shared/accounts.ts";
 import type { AccountState, WindowName } from "../../shared/state.ts";
 
-export type AccountView = Account & { state: AccountState | null; poolActive: boolean; nextChat?: boolean; available?: boolean; canDeleteLogin: boolean };
+export type AccountView = Account & { state: AccountState | null; poolActive: boolean; nextChat?: boolean; available?: boolean; activeChats?: number; canDeleteLogin: boolean };
 
 export function duration(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60_000));

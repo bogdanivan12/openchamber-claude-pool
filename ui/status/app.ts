@@ -54,7 +54,12 @@ function row(a: AccountView, now: number, out: Element[]): void {
   if (badge.tone === "error") head.append(el("span", "note error", badge.label.toLowerCase()));
   else if (badge.tone === "warning") head.append(el("span", "note warning", badge.label.toLowerCase()));
   else if (k.kind === "out") head.append(el("span", "note warning", "limit reached"));
-  else if (a.nextChat) head.append(el("span", "note muted", "next for new chats"));
+  else {
+    const parts: string[] = [];
+    if ((a.activeChats ?? 0) > 0) parts.push(`${a.activeChats} chat${a.activeChats === 1 ? "" : "s"}`);
+    if (a.nextChat) parts.push("next for new chats");
+    if (parts.length) head.append(el("span", "note muted", parts.join(" · ")));
+  }
   const r = el("div", "row");
   r.append(head);
   for (const l of [windowLine("5-Hour", a, "five_hour", now), windowLine("7-Day Limit", a, "seven_day", now)]) if (l) r.append(l);
@@ -62,7 +67,7 @@ function row(a: AccountView, now: number, out: Element[]): void {
 }
 
 /** Builds the Work Status section inside `root`. It refreshes on mount and on each ready; there is no timer. */
-export function createStatus(host: StatusHost, root: Element, opts: { now?: () => number } = {}): void {
+export function createStatus(host: StatusHost, root: Element, opts: { now?: () => number; pollMs?: number } = {}): void {
   const client = api(host);
   const now = opts.now ?? Date.now;
   let seq = 0;
@@ -108,8 +113,12 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
     await reportHeight();
   }
 
+  let timer: ReturnType<typeof setInterval> | undefined;
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
     void load();
+    // Activity changes while chatting, so keep the dots fresh; one timer however many ready events.
+    const every = opts.pollMs ?? 30_000;
+    if (every > 0 && timer === undefined) timer = setInterval(() => void load(), every);
   });
 }

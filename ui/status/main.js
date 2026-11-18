@@ -2112,8 +2112,15 @@ function row(a, now, out) {
     head.append(el2("span", "note warning", badge.label.toLowerCase()));
   else if (k.kind === "out")
     head.append(el2("span", "note warning", "limit reached"));
-  else if (a.nextChat)
-    head.append(el2("span", "note muted", "next for new chats"));
+  else {
+    const parts = [];
+    if ((a.activeChats ?? 0) > 0)
+      parts.push(`${a.activeChats} chat${a.activeChats === 1 ? "" : "s"}`);
+    if (a.nextChat)
+      parts.push("next for new chats");
+    if (parts.length)
+      head.append(el2("span", "note muted", parts.join(" · ")));
+  }
   const r = el2("div", "row");
   r.append(head);
   for (const l of [windowLine("5-Hour", a, "five_hour", now), windowLine("7-Day Limit", a, "seven_day", now)])
@@ -2166,9 +2173,13 @@ function createStatus(host, root, opts = {}) {
     body.replaceChildren(...children);
     await reportHeight();
   }
+  let timer;
   host.onReady((context) => {
     applyHostReady(context, document.documentElement);
     load();
+    const every = opts.pollMs ?? 30000;
+    if (every > 0 && timer === undefined)
+      timer = setInterval(() => void load(), every);
   });
 }
 

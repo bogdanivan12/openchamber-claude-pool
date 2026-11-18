@@ -228,18 +228,23 @@ describe("account api", () => {
     expect(logouts).toEqual([]);
   });
 
-  it("marks the account conversations run on as in use, and the router's pick for new chats separately", async () => {
+  it("marks accounts with recently active conversations as in use, each one, and idle accounts as not", async () => {
     const { home, dataDir, call } = setup();
     await call("POST /api/import", { configDirs: [join(home, ".claude"), join(home, ".claude-b")] });
     const [a, b] = readAccounts(dataDir).accounts;
     updateState((st) => {
       st.accounts[a.id] = { windows: { five_hour: { usedPercent: 79, resetsAt: null, updatedAt: 1 } }, limitedUntil: null, needsLogin: false };
       st.accounts[b.id] = { windows: { five_hour: { usedPercent: 3, resetsAt: null, updatedAt: 1 } }, limitedUntil: null, needsLogin: false };
-      st.conversations.s1 = { accountId: a.id, at: Date.now() };
+      st.conversations.s1 = { accountId: a.id, at: Date.now(), activeAt: Date.now() };
+      st.conversations.s2 = { accountId: a.id, at: Date.now(), activeAt: Date.now() };
+      st.conversations.s3 = { accountId: b.id, at: Date.now(), activeAt: Date.now() - 10 * 60_000 }; // idle
     }, dataDir);
-    const out: any = await call("GET /api/accounts");
-    expect(out.body.accounts[0]).toMatchObject({ id: a.id, poolActive: true, nextChat: false });
-    expect(out.body.accounts[1]).toMatchObject({ id: b.id, poolActive: false, nextChat: true, available: true });
+    let out: any = await call("GET /api/accounts");
+    expect(out.body.accounts[0]).toMatchObject({ id: a.id, poolActive: true, activeChats: 2, nextChat: false });
+    expect(out.body.accounts[1]).toMatchObject({ id: b.id, poolActive: false, activeChats: 0, nextChat: true, available: true });
+    updateState((st) => { st.conversations.s4 = { accountId: b.id, at: Date.now(), activeAt: Date.now() }; }, dataDir);
+    out = await call("GET /api/accounts");
+    expect(out.body.accounts.map((x: any) => x.poolActive)).toEqual([true, true]);
   });
 
   it("lists accounts with their state, the picked account and the backup flag", async () => {
@@ -251,7 +256,7 @@ describe("account api", () => {
     }, dataDir);
     const out: any = await call("GET /api/accounts");
     expect(out.body.accounts.map((x: any) => x.id)).toEqual([a.id, b.id]);
-    expect(out.body.accounts[0]).toMatchObject({ canDeleteLogin: false, poolActive: true, state: null });
+    expect(out.body.accounts[0]).toMatchObject({ canDeleteLogin: false, poolActive: false, nextChat: true, state: null });
     expect(out.body.accounts[1]).toMatchObject({ canDeleteLogin: false, poolActive: false });
     expect(out.body.accounts[1].state.windows.five_hour.usedPercent).toBe(12);
     expect(out.body.threshold).toBe(90);

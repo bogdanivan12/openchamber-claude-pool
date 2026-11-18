@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CONVERSATION_TTL_MS, bindConversation, emptyState, markLimited, readState, recordWindow,
+  ACTIVE_WINDOW_MS, CONVERSATION_TTL_MS, activeConversations, bindConversation, touchConversation, emptyState, markLimited, readState, recordWindow,
   setNeedsLogin, fractionToPercent, clampPercent, updateState, windowNameFromRateLimitType,
 } from "./state.ts";
 
@@ -73,5 +73,21 @@ describe("state", () => {
     const t = emptyState();
     recordWindow(t, "bbbbbb", "five_hour", { usedPercent: NaN, resetsAt: 1, updatedAt: 1 });
     expect(t.accounts.bbbbbb?.windows.five_hour).toBeUndefined();
+  });
+});
+
+describe("conversation activity", () => {
+  it("counts conversations per account that made a request within the window, and touch updates only known ones", () => {
+    const s = emptyState();
+    bindConversation(s, "a", "aaaaaa", 1000);
+    bindConversation(s, "b", "aaaaaa", 1000);
+    bindConversation(s, "c", "bbbbbb", 1000);
+    touchConversation(s, "ghost", 5000);
+    expect(s.conversations.ghost).toBeUndefined();
+    const now = 1000 + ACTIVE_WINDOW_MS;
+    touchConversation(s, "c", now);
+    expect(activeConversations(s, now)).toEqual({ aaaaaa: 2, bbbbbb: 1 });
+    expect(activeConversations(s, now + 1)).toEqual({ bbbbbb: 1 });
+    expect(activeConversations({ ...s, conversations: { old: { accountId: "aaaaaa", at: 1 } } }, now)).toEqual({});
   });
 });

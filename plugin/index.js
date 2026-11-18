@@ -57391,6 +57391,7 @@ function findClaudeSessionFile(foreignSessionId, configDir) {
 // shared/state.ts
 init_zod();
 var CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
+var ACTIVE_WINDOW_MS = 5 * 60000;
 var windowSchema = object({ usedPercent: number2().min(0).max(100), resetsAt: number2().nullable(), updatedAt: number2() });
 var accountSchema2 = object({
   windows: object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
@@ -57400,7 +57401,7 @@ var accountSchema2 = object({
 var stateSchema = object({
   version: literal(1),
   accounts: record(string2(), accountSchema2),
-  conversations: record(string2(), object({ accountId: string2(), at: number2() }))
+  conversations: record(string2(), object({ accountId: string2(), at: number2(), activeAt: number2().optional() }))
 });
 var emptyState = () => ({ version: 1, accounts: {}, conversations: {} });
 function readState2(dataDir = poolDataDir()) {
@@ -57439,7 +57440,12 @@ function markLimited(s, id, until) {
   a.limitedUntil = Math.max(a.limitedUntil ?? 0, until);
 }
 function bindConversation(s, key, id, now) {
-  s.conversations[key] = { accountId: id, at: now };
+  s.conversations[key] = { accountId: id, at: now, activeAt: now };
+}
+function touchConversation(s, key, now) {
+  const c = s.conversations[key];
+  if (c)
+    c.activeAt = now;
 }
 function windowNameFromRateLimitType(t) {
   return t === "five_hour" || t === "seven_day" ? t : undefined;
@@ -57569,6 +57575,17 @@ async function limitFromResponse(res) {
 }
 var MIN_LIMIT_MS = 5000;
 var BINDING_REFRESH_MS = 24 * 3600 * 1000;
+var TOUCH_EVERY_MS = 15000;
+function touch(dataDir, key, now) {
+  if (!key)
+    return;
+  const c = readState2(dataDir).conversations[key];
+  if (!c || now - (c.activeAt ?? 0) < TOUCH_EVERY_MS)
+    return;
+  try {
+    updateState((s) => touchConversation(s, key, now), dataDir);
+  } catch {}
+}
 function earliestRetryAt(enabled, state, threshold, now) {
   const all = route({ accounts: enabled, state, threshold, now });
   return all.kind === "none" ? all.retryAt : null;
@@ -57610,6 +57627,7 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
   const sessionKey = req.headers.get(SESSION_HEADER) ?? undefined;
   const parked = sessionKey ? findBridgeByConversation(sessionKey) : undefined;
   if (parked) {
+    touch(dataDir, sessionKey, Date.now());
     return handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body);
   }
   const kind = req.headers.get(KIND_HEADER);
@@ -57623,6 +57641,7 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
   if (!primary) {
     const st = previous ? readState2(dataDir).accounts[previous.id] : undefined;
     if (previous && !st?.needsLogin && !((st?.limitedUntil ?? 0) > Date.now())) {
+      touch(dataDir, sessionKey, Date.now());
       return handle(withAccountDir(req, previous.configDir), body);
     }
   }
@@ -57647,6 +57666,8 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
       const binding = state.conversations[sessionKey];
       if (!binding || binding.accountId !== account.id || now - binding.at > BINDING_REFRESH_MS) {
         updateState((s) => bindConversation(s, sessionKey, account.id, now), dataDir);
+      } else {
+        touch(dataDir, sessionKey, now);
       }
     }
     const res = await handle(withAccountDir(req, account.configDir), body);

@@ -5,7 +5,7 @@ import { MAX_THRESHOLD, MIN_THRESHOLD, enabledAccounts, newAccountId, readAccoun
 import { readCredential } from "../../shared/creds.ts";
 import { accountsFile, isInsidePoolAccounts, normalizeDir, poolDataDir, sameDir } from "../../shared/paths.ts";
 import { isAvailable, route } from "../../shared/router.ts";
-import { readState } from "../../shared/state.ts";
+import { activeConversations, readState } from "../../shared/state.ts";
 import { logoutDir, readAuthStatus } from "./auth-status.ts";
 import type { Route } from "./http.ts";
 import { findImportCandidates } from "./import.ts";
@@ -72,11 +72,8 @@ export function accountRoutes(deps: {
       const state = readState(dataDir);
       const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
       const nextChat = choice.kind === "account" ? choice.account.id : null;
-      // "In use" is where conversations actually run: the newest binding on an enabled account.
-      // New conversations may be routed elsewhere (more headroom); that is `nextChat`.
-      const enabledIds = new Set(enabledAccounts(file).map((a) => a.id));
-      const newest = Object.values(state.conversations).filter((b) => enabledIds.has(b.accountId)).sort((x, y) => y.at - x.at)[0];
-      const active = newest?.accountId ?? nextChat;
+      // "In use" = the account has conversations with a request in the last few minutes.
+      const activeBy = activeConversations(state, Date.now());
       return {
         status: 200,
         body: {
@@ -86,8 +83,9 @@ export function accountRoutes(deps: {
           accounts: [...file.accounts].sort((a, b) => a.order - b.order).map((a) => ({
             ...a,
             state: state.accounts[a.id] ?? null,
-            poolActive: a.id === active,
-            nextChat: a.id === nextChat && a.id !== active,
+            poolActive: (activeBy[a.id] ?? 0) > 0,
+            activeChats: activeBy[a.id] ?? 0,
+            nextChat: a.id === nextChat,
             available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir),
           })),

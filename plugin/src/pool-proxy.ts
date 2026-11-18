@@ -1,7 +1,7 @@
 import { enabledAccounts, readAccounts, type Account } from "../../shared/accounts.ts";
 import { defaultConfigDir, isDefaultConfigDir, poolDataDir } from "../../shared/paths.ts";
 import { route } from "../../shared/router.ts";
-import { bindConversation, markLimited, readState, updateState, type PoolState } from "../../shared/state.ts";
+import { bindConversation, markLimited, readState, touchConversation, updateState, type PoolState } from "../../shared/state.ts";
 import { findBridgeByConversation } from "./bridge-pool.js";
 import { ACCOUNT_HEADER, CONFIG_DIR_HEADER, KIND_HEADER, SESSION_HEADER } from "./constants.js";
 import { log } from "./log.js";
@@ -42,6 +42,15 @@ export async function limitFromResponse(res: Response): Promise<{ until: number 
 const MIN_LIMIT_MS = 5000;
 /** A binding is renewed at most this often; state.ts prunes bindings idle for 30 days. */
 export const BINDING_REFRESH_MS = 24 * 3600 * 1000;
+/** Activity is written at most this often per conversation, so a tool loop does not hammer state.json. */
+export const TOUCH_EVERY_MS = 15_000;
+
+function touch(dataDir: string, key: string | undefined, now: number): void {
+  if (!key) return;
+  const c = readState(dataDir).conversations[key];
+  if (!c || now - (c.activeAt ?? 0) < TOUCH_EVERY_MS) return;
+  try { updateState((s) => touchConversation(s, key, now), dataDir); } catch { /* activity is only a hint */ }
+}
 
 /** The earliest moment any account is available, ignoring which ones were tried; null when none has a known time. */
 export function earliestRetryAt(enabled: Account[], state: PoolState, threshold: number, now: number): number | null {
@@ -106,6 +115,7 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
   // A turn parked on tool results continues on the account that started it.
   const parked = sessionKey ? findBridgeByConversation(sessionKey) : undefined;
   if (parked) {
+    touch(dataDir, sessionKey, Date.now());
     return handle(withAccountDir(req, parked.configDir ?? defaultConfigDir()), body);
   }
 
@@ -122,6 +132,7 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
   if (!primary) {
     const st = previous ? readState(dataDir).accounts[previous.id] : undefined;
     if (previous && !st?.needsLogin && !((st?.limitedUntil ?? 0) > Date.now())) {
+      touch(dataDir, sessionKey, Date.now());
       return handle(withAccountDir(req, previous.configDir), body);
     }
   }
@@ -147,6 +158,8 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
       const binding = state.conversations[sessionKey];
       if (!binding || binding.accountId !== account.id || now - binding.at > BINDING_REFRESH_MS) {
         updateState((s) => bindConversation(s, sessionKey, account.id, now), dataDir);
+      } else {
+        touch(dataDir, sessionKey, now);
       }
     }
 

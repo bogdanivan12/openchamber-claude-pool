@@ -6434,6 +6434,7 @@ function route(input) {
 
 // shared/state.ts
 var CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
+var ACTIVE_WINDOW_MS = 5 * 60000;
 var windowSchema = object({ usedPercent: number2().min(0).max(100), resetsAt: number2().nullable(), updatedAt: number2() });
 var accountSchema2 = object({
   windows: object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
@@ -6443,7 +6444,7 @@ var accountSchema2 = object({
 var stateSchema = object({
   version: literal(1),
   accounts: record(string2(), accountSchema2),
-  conversations: record(string2(), object({ accountId: string2(), at: number2() }))
+  conversations: record(string2(), object({ accountId: string2(), at: number2(), activeAt: number2().optional() }))
 });
 var emptyState = () => ({ version: 1, accounts: {}, conversations: {} });
 function readState(dataDir = poolDataDir()) {
@@ -6479,6 +6480,14 @@ function recordWindow(s, id, name, w) {
 }
 function setNeedsLogin(s, id, value) {
   accountState(s, id).needsLogin = value;
+}
+function activeConversations(s, now) {
+  const out = {};
+  for (const c of Object.values(s.conversations)) {
+    if (c.activeAt !== undefined && now - c.activeAt <= ACTIVE_WINDOW_MS)
+      out[c.accountId] = (out[c.accountId] ?? 0) + 1;
+  }
+  return out;
 }
 var round1 = (n) => Math.round(n * 10) / 10;
 function clampPercent(p) {
@@ -6649,9 +6658,7 @@ function accountRoutes(deps = {}) {
       const state = readState(dataDir);
       const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
       const nextChat = choice.kind === "account" ? choice.account.id : null;
-      const enabledIds = new Set(enabledAccounts(file).map((a) => a.id));
-      const newest = Object.values(state.conversations).filter((b) => enabledIds.has(b.accountId)).sort((x, y) => y.at - x.at)[0];
-      const active = newest?.accountId ?? nextChat;
+      const activeBy = activeConversations(state, Date.now());
       return {
         status: 200,
         body: {
@@ -6661,8 +6668,9 @@ function accountRoutes(deps = {}) {
           accounts: [...file.accounts].sort((a, b) => a.order - b.order).map((a) => ({
             ...a,
             state: state.accounts[a.id] ?? null,
-            poolActive: a.id === active,
-            nextChat: a.id === nextChat && a.id !== active,
+            poolActive: (activeBy[a.id] ?? 0) > 0,
+            activeChats: activeBy[a.id] ?? 0,
+            nextChat: a.id === nextChat,
             available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir)
           }))

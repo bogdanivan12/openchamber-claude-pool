@@ -3,6 +3,8 @@ import { lockFile, poolDataDir, stateFile } from "./paths.ts";
 import { readJsonFile, withLock, writeJsonAtomic } from "./store-io.ts";
 
 export const CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
+/** A conversation counts as active while its last request is younger than this. */
+export const ACTIVE_WINDOW_MS = 5 * 60_000;
 
 const windowSchema = z.object({ usedPercent: z.number().min(0).max(100), resetsAt: z.number().nullable(), updatedAt: z.number() });
 const accountSchema = z.object({
@@ -13,7 +15,7 @@ const accountSchema = z.object({
 const stateSchema = z.object({
   version: z.literal(1),
   accounts: z.record(z.string(), accountSchema),
-  conversations: z.record(z.string(), z.object({ accountId: z.string(), at: z.number() })),
+  conversations: z.record(z.string(), z.object({ accountId: z.string(), at: z.number(), activeAt: z.number().optional() })),
 });
 
 export type WindowName = "five_hour" | "seven_day";
@@ -65,7 +67,22 @@ export function setNeedsLogin(s: PoolState, id: string, value: boolean): void {
 }
 
 export function bindConversation(s: PoolState, key: string, id: string, now: number): void {
-  s.conversations[key] = { accountId: id, at: now };
+  s.conversations[key] = { accountId: id, at: now, activeAt: now };
+}
+
+/** Records that the conversation just made a request. No-op for an unknown conversation. */
+export function touchConversation(s: PoolState, key: string, now: number): void {
+  const c = s.conversations[key];
+  if (c) c.activeAt = now;
+}
+
+/** Active conversations per account id (last request within the window). */
+export function activeConversations(s: PoolState, now: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const c of Object.values(s.conversations)) {
+    if (c.activeAt !== undefined && now - c.activeAt <= ACTIVE_WINDOW_MS) out[c.accountId] = (out[c.accountId] ?? 0) + 1;
+  }
+  return out;
 }
 
 export function windowNameFromRateLimitType(t: string | undefined): WindowName | undefined {
