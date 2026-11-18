@@ -6382,6 +6382,13 @@ function windowsOf(st, now, label) {
     out["7d"] = d;
   return out;
 }
+function age(ms) {
+  const min = Math.max(1, Math.floor(ms / 60000));
+  if (min < 60)
+    return `${min} min`;
+  const h = Math.floor(min / 60);
+  return h < 48 ? `${h} h` : `${Math.floor(h / 24)} d`;
+}
 function planSummary(reads, accounts) {
   const counts = new Map;
   for (const a of accounts) {
@@ -6404,7 +6411,13 @@ function buildQuotaAnswer(input) {
     const windows = windowsOf(st, now);
     if (Object.keys(windows).length === 0 && !st?.needsLogin)
       continue;
-    const name = st?.needsLogin ? `${a.label} (sign in again)` : st?.limitedUntil && st.limitedUntil > now ? `${a.label} (limited)` : a.label;
+    const failed = reads[a.id] && !reads[a.id].ok;
+    const newest = Math.max(0, ...Object.values(st?.windows ?? {}).map((w) => w?.updatedAt ?? 0));
+    const suffix = st?.needsLogin ? " (sign in again)" : st?.limitedUntil && st.limitedUntil > now ? " (limited)" : failed && newest > 0 ? ` (data ${age(now - newest)} old)` : "";
+    const base = `${a.label}${suffix}`;
+    let name = base;
+    for (let n = 0;name in models; n++)
+      name = `${base} #${a.id.slice(0, 4)}${n ? `-${n}` : ""}`;
     models[name] = { windows };
   }
   const hasData = Object.values(models).some((m) => Object.keys(m.windows).length > 0);
@@ -6413,7 +6426,7 @@ function buildQuotaAnswer(input) {
     return { ok: false, configured: true, error: firstError.slice(0, 2000), planLabel: planSummary(reads, accounts), usage: null };
   }
   const routed = route({ accounts, state, threshold, now });
-  const top = routed.kind === "account" ? routed.account : accounts[0];
+  const top = routed.kind === "account" ? routed.account : accounts.find((a) => Object.keys(windowsOf(state.accounts[a.id], now)).length > 0) ?? accounts[0];
   return {
     ok: true,
     configured: true,
@@ -6503,7 +6516,12 @@ function parseUsagePayload(payload) {
 async function readAccountUsage(account, deps = {}) {
   const now = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
-  const cred = await (deps.readCredential ?? readCredential)(account.configDir);
+  let cred;
+  try {
+    cred = await (deps.readCredential ?? readCredential)(account.configDir);
+  } catch (err) {
+    return { ok: false, plan: null, error: `${account.label}: could not read the login (${err instanceof Error ? err.message.slice(0, 200) : "unknown error"})` };
+  }
   if (!cred)
     return { ok: false, needsLogin: true, plan: null, error: `No Claude login found (or the Keychain denied access) for ${account.label}. Sign in again in the Claude Pool panel.` };
   const plan = cred.subscriptionType;
@@ -6519,7 +6537,8 @@ async function readAccountUsage(account, deps = {}) {
     return { ok: false, plan, error: `${account.label}: ${err instanceof Error ? err.message : "request failed"}` };
   }
   if (res.status === 429) {
-    const ra = Number(res.headers.get("retry-after"));
+    const h = res.headers.get("retry-after");
+    const ra = h === null || h.trim() === "" ? NaN : Number(h);
     cooldownUntil.set(account.id, now + (Number.isFinite(ra) && ra >= 0 ? Math.min(ra * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS));
     return { ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` };
   }
@@ -6541,9 +6560,12 @@ async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
   const now = (deps.now ?? Date.now)();
   const out = {};
   updateState((s) => {
+    const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
     accounts.forEach((a, i) => {
       const r = reads[i];
       out[a.id] = r;
+      if (!present.has(a.id))
+        return;
       if (r.ok) {
         setNeedsLogin(s, a.id, false);
         for (const [name, w] of Object.entries(r.windows))
@@ -6556,18 +6578,24 @@ async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
   return out;
 }
 
+// service/src/quota-route.ts
+function quotaRoute(deps = {}) {
+  const { dataDir = poolDataDir(), ...usageDeps } = deps;
+  return async (r) => {
+    if (!readQuotaProviderRequest(r.body))
+      return { status: 400, body: { error: "not a usage call this service understands" } };
+    const reads = await refreshAllUsage(dataDir, usageDeps);
+    const file = readAccounts(dataDir);
+    const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(dataDir), threshold: file.threshold, now: (usageDeps.now ?? Date.now)(), reads });
+    return { status: 200, body: { ok: true, data } };
+  };
+}
+
 // service/src/routes.ts
 var routes = {
   "GET /health": () => ({ status: 200, body: { ok: true } })
 };
-routes["POST /quota"] = async (r) => {
-  if (!readQuotaProviderRequest(r.body))
-    return { status: 400, body: { error: "not a usage call this service understands" } };
-  const reads = await refreshAllUsage();
-  const file = readAccounts();
-  const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(), threshold: file.threshold, now: Date.now(), reads });
-  return { status: 200, body: { ok: true, data } };
-};
+routes["POST /quota"] = quotaRoute();
 
 // service/src/main.ts
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);

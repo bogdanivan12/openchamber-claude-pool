@@ -44,4 +44,29 @@ describe("usage", () => {
     await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 2000 });
     expect(calls).toBe(1);
   });
+
+  it("a 429 without retry-after uses the 5 minute default", async () => {
+    let calls = 0;
+    const f = (async () => { calls++; return new Response("", { status: 429 }); }) as any;
+    const acc = { ...account, id: "ffffff" };
+    await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 1000 });
+    await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 1000 + 4 * 60_000 });
+    expect(calls).toBe(1);
+    await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 1000 + 5 * 60_000 + 1 });
+    expect(calls).toBe(2);
+  });
+
+  it("retry-after: 0 ends the cooldown immediately", async () => {
+    let calls = 0;
+    const f = (async () => { calls++; return new Response("", { status: 429, headers: { "retry-after": "0" } }); }) as any;
+    const acc = { ...account, id: "abcabc" };
+    await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 1000 });
+    await readAccountUsage(acc, { readCredential: cred, fetch: f, now: () => 1000 });
+    expect(calls).toBe(2);
+  });
+
+  it("a throwing readCredential is an error result, not a rejection", async () => {
+    const r = await readAccountUsage({ ...account, id: "123456" }, { readCredential: async () => { throw new Error("boom"); } });
+    expect(r).toMatchObject({ ok: false, plan: null });
+  });
 });

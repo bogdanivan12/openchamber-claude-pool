@@ -14,7 +14,7 @@ export type UsageRead =
   | { ok: true; windows: Partial<Record<"five_hour" | "seven_day", Win>>; plan: string | null }
   | { ok: false; error: string; needsLogin?: boolean; plan: string | null };
 
-type Deps = { fetch?: typeof fetch; readCredential?: typeof defaultReadCredential; now?: () => number };
+export type UsageDeps = { fetch?: typeof fetch; readCredential?: typeof defaultReadCredential; now?: () => number };
 
 const cooldownUntil = new Map<string, number>();
 
@@ -43,10 +43,15 @@ export function parseUsagePayload(payload: unknown): UsageRead & { ok: true } {
   return { ok: true, windows, plan: null };
 }
 
-export async function readAccountUsage(account: Account, deps: Deps = {}): Promise<UsageRead> {
+export async function readAccountUsage(account: Account, deps: UsageDeps = {}): Promise<UsageRead> {
   const now = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
-  const cred = await (deps.readCredential ?? defaultReadCredential)(account.configDir);
+  let cred: Awaited<ReturnType<typeof defaultReadCredential>>;
+  try {
+    cred = await (deps.readCredential ?? defaultReadCredential)(account.configDir);
+  } catch (err) {
+    return { ok: false, plan: null, error: `${account.label}: could not read the login (${err instanceof Error ? err.message.slice(0, 200) : "unknown error"})` };
+  }
   if (!cred) return { ok: false, needsLogin: true, plan: null, error: `No Claude login found (or the Keychain denied access) for ${account.label}. Sign in again in the Claude Pool panel.` };
   const plan = cred.subscriptionType;
   if (cred.expiresAt !== null && cred.expiresAt > 0 && cred.expiresAt <= now) {
@@ -60,7 +65,8 @@ export async function readAccountUsage(account: Account, deps: Deps = {}): Promi
     return { ok: false, plan, error: `${account.label}: ${err instanceof Error ? err.message : "request failed"}` };
   }
   if (res.status === 429) {
-    const ra = Number(res.headers.get("retry-after"));
+    const h = res.headers.get("retry-after");
+    const ra = h === null || h.trim() === "" ? NaN : Number(h);
     cooldownUntil.set(account.id, now + (Number.isFinite(ra) && ra >= 0 ? Math.min(ra * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS));
     return { ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` };
   }
@@ -74,15 +80,17 @@ export async function readAccountUsage(account: Account, deps: Deps = {}): Promi
   }
 }
 
-export async function refreshAllUsage(dataDir: string = poolDataDir(), deps: Deps = {}): Promise<Record<string, UsageRead>> {
+export async function refreshAllUsage(dataDir: string = poolDataDir(), deps: UsageDeps = {}): Promise<Record<string, UsageRead>> {
   const accounts = enabledAccounts(readAccounts(dataDir));
   const reads = await Promise.all(accounts.map((a) => readAccountUsage(a, deps)));
   const now = (deps.now ?? Date.now)();
   const out: Record<string, UsageRead> = {};
   updateState((s) => {
+    const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
     accounts.forEach((a, i) => {
       const r = reads[i];
       out[a.id] = r;
+      if (!present.has(a.id)) return;
       if (r.ok) {
         setNeedsLogin(s, a.id, false);
         for (const [name, w] of Object.entries(r.windows)) recordWindow(s, a.id, name as "five_hour" | "seven_day", { ...w!, updatedAt: now });

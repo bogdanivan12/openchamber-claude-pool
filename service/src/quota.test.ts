@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { quotaProviderSchemasV1 } from "@openchamber/sdk/schemas";
-import { emptyState, recordWindow, setNeedsLogin } from "../../shared/state.ts";
+import { emptyState, markLimited, recordWindow, setNeedsLogin } from "../../shared/state.ts";
 import { buildQuotaAnswer } from "./quota.ts";
 
 const A = { id: "aaaaaa", label: "work", configDir: "/a", order: 0, enabled: true };
@@ -46,5 +46,45 @@ describe("quota answer", () => {
     const data = buildQuotaAnswer({ accounts: [], state: emptyState(), threshold: 90, now: NOW, reads: {} });
     expect(data).toMatchObject({ ok: false, configured: true });
     expect(data.error).toMatch(/Claude Pool panel/);
+  });
+
+  it("a failed read shows how old the stored data is, never when the read succeeded or is absent", () => {
+    const s = emptyState();
+    recordWindow(s, "aaaaaa", "five_hour", { usedPercent: 20, resetsAt: RESET, updatedAt: NOW - 12 * 60_000 });
+    recordWindow(s, "bbbbbb", "five_hour", { usedPercent: 20, resetsAt: RESET, updatedAt: NOW - 3 * 3600_000 });
+    const failed = { ok: false as const, error: "network down", plan: null };
+    const names = (reads: any) => Object.keys(buildQuotaAnswer({ accounts: [A, B], state: s, threshold: 90, now: NOW, reads }).usage?.models ?? {});
+    expect(names({ aaaaaa: failed, bbbbbb: failed })).toEqual(["work (data 12 min old)", "home (data 3 h old)"]);
+    expect(names({ aaaaaa: { ok: true, windows: {}, plan: null } })).toEqual(["work", "home"]);
+    expect(names({})).toEqual(["work", "home"]);
+  });
+
+  it("sign-in outranks limited outranks stale", () => {
+    const s = emptyState();
+    recordWindow(s, "aaaaaa", "five_hour", { usedPercent: 20, resetsAt: RESET, updatedAt: NOW - 60_000 });
+    recordWindow(s, "bbbbbb", "five_hour", { usedPercent: 20, resetsAt: RESET, updatedAt: NOW - 60_000 });
+    setNeedsLogin(s, "aaaaaa", true);
+    markLimited(s, "bbbbbb", NOW + 1000);
+    const failed = { ok: false as const, error: "x", plan: null };
+    const data = buildQuotaAnswer({ accounts: [A, B], state: s, threshold: 90, now: NOW, reads: { aaaaaa: failed, bbbbbb: failed } });
+    expect(Object.keys(data.usage?.models ?? {})).toEqual(["work (sign in again)", "home (limited)"]);
+  });
+
+  it("accounts with the same label both appear under unique names", () => {
+    const s = emptyState();
+    recordWindow(s, "aaaaaa", "five_hour", { usedPercent: 20, resetsAt: RESET, updatedAt: NOW });
+    recordWindow(s, "bbbbbb", "five_hour", { usedPercent: 30, resetsAt: RESET, updatedAt: NOW });
+    const data = buildQuotaAnswer({ accounts: [A, { ...B, label: "work" }], state: s, threshold: 90, now: NOW, reads: {} });
+    expect(Object.keys(data.usage?.models ?? {})).toEqual(["work", "work #bbbb"]);
+    expect(quotaProviderSchemasV1.usage.safeParse(data).success).toBe(true);
+  });
+
+  it("when nothing is routable the top group is the first account with data", () => {
+    const s = emptyState();
+    recordWindow(s, "bbbbbb", "five_hour", { usedPercent: 99, resetsAt: RESET, updatedAt: NOW });
+    markLimited(s, "aaaaaa", NOW + 1000);
+    markLimited(s, "bbbbbb", NOW + 1000);
+    const data = buildQuotaAnswer({ accounts: [A, B], state: s, threshold: 90, now: NOW, reads: {} });
+    expect(data.usage?.windows["5h"]).toMatchObject({ usedPercent: 99, valueLabel: "home" });
   });
 });
