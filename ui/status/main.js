@@ -2079,7 +2079,7 @@ function windowLine(label, a, name, now) {
   left.append(el2("span", "", label));
   if (w.resetsAt !== null && w.resetsAt > now)
     left.append(el2("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
-  const tone = percent >= 90 ? "pct error" : "pct";
+  const tone = percent >= 80 ? "pct pct-error" : percent >= 50 ? "pct pct-warning" : "pct";
   const l = el2("div", "win");
   l.append(left, el2("span", tone, `${percent}%`));
   return l;

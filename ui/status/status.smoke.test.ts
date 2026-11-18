@@ -61,6 +61,8 @@ describe("status section smoke test (happy-dom, fake service)", () => {
     expect(five.querySelector(".pct")?.textContent).toBe("72%");
     expect(seven.textContent).toContain("7-Day Limit");
     expect(seven.querySelector(".pct")?.textContent).toBe("10%");
+    expect(five.querySelector(".pct-warning")).not.toBeNull();
+    expect(seven.querySelector(".pct-warning, .pct-error")).toBeNull();
   });
 
   it("shows sign in again for needsLogin and the time left when limited", async () => {

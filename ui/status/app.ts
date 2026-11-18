@@ -33,7 +33,7 @@ function windowLine(label: string, a: AccountView, name: "five_hour" | "seven_da
   const left = el("span", "win-label");
   left.append(el("span", "", label));
   if (w.resetsAt !== null && w.resetsAt > now) left.append(el("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
-  const tone = percent >= 90 ? "pct error" : "pct";
+  const tone = percent >= 80 ? "pct pct-error" : percent >= 50 ? "pct pct-warning" : "pct";
   const l = el("div", "win");
   l.append(left, el("span", tone, `${percent}%`));
   return l;

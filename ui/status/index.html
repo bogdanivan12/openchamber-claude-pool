@@ -13,14 +13,16 @@
       .active { font-weight: 600; }
       .note { flex: none; opacity: .8; }
       .win { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-left: 1.4em; }
-      .win-label { display: flex; gap: .6em; align-items: baseline; opacity: .8; }
-      .win-reset { font-size: .85em; opacity: .6; }
-      .pct { color: var(--warning, #d9822b); font-variant-numeric: tabular-nums; }
+      .win-label { display: flex; gap: .4em; align-items: baseline; }
+      .win-reset { font-size: .6875rem; color: var(--surface-muted-foreground, inherit); opacity: .9; }
+      .pct { font-variant-numeric: tabular-nums; }
+      .pct-warning { color: var(--status-warning, var(--warning, #d9822b)); }
+      .pct-error { color: var(--status-error, var(--destructive, #d33)); }
       .muted { opacity: .7; }
       .line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .error-line { white-space: normal; overflow-wrap: anywhere; }
-      .error { color: var(--destructive, #d33); opacity: 1; }
-      .warning { color: var(--warning, #c80); opacity: 1; }
+      .error { color: var(--status-error, var(--destructive, #d33)); opacity: 1; }
+      .warning { color: var(--status-warning, var(--warning, #c80)); opacity: 1; }
       .refresh { position: absolute; top: 0; right: 0; border: 0; background: transparent; color: inherit; font: inherit; opacity: .5; cursor: pointer; padding: 0 2px; }
       .refresh:hover { opacity: 1; }
     </style>
