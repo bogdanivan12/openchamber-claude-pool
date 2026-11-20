@@ -11,6 +11,8 @@ const accountSchema = z.looseObject({
   windows: z.object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
   limitedUntil: z.number().nullable(),
   needsLogin: z.boolean(),
+  /** Anthropic rate-limited usage reads for this account until then; shared by the service and the plugin. */
+  usageCooldownUntil: z.number().optional(),
 });
 const stateSchema = z.looseObject({
   version: z.literal(1),

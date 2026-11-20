@@ -2,7 +2,7 @@
 
 An [OpenChamber](https://github.com/openchamber/openchamber) extension that lets you use several Claude subscriptions (Pro or Max) at once. It adds a failover **pool** provider, one provider per account, a panel to add and manage accounts, a usage card with a group per account, and a Work Status section with a 5h bar per enabled account.
 
-Status: 0.3.0, not yet published.
+Status: 0.4.0, not yet published.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Other panel actions: turn an account on or off ("In pool"), and from the "⋯" m
 
 ## Using it
 
-The panel has a **How it works** button that opens this section as a FAQ inside OpenChamber: which account a new chat gets, when a chat moves, what happens when every account is at its limit, what the labels and the threshold mean.
+The panel has a **How it works** button that opens this section as a FAQ inside OpenChamber: which account a new chat gets, when a chat moves, what happens when every account is at its limit, what the labels mean.
 
 The model picker shows these providers only when at least one account is enabled:
 
@@ -42,10 +42,11 @@ The model picker shows these providers only when at least one account is enabled
 
 How the pool behaves:
 
-- A conversation sticks to its account until that account passes the threshold or hits a limit. The threshold applies to the 5h and the 7-day window and defaults to 90%. Set it between 50 and 100 in the panel.
+- A conversation sticks to its account until that account is full (100% of its 5h or 7-day window) or hits a limit. There is no switch threshold to set: accounts are used up to their real limit.
+- Before a `Claude Pool` request picks an account, usage older than 2 minutes is read again from Anthropic: for every account on a new conversation, and only for accounts at 85% or more on a running one. The request waits at most 1.5 s for it; a slower read is still saved and used by the next request. A 429 from the usage endpoint pauses reads of that account for the service and the plugin alike.
 - Then the conversation moves to the account with the most headroom. If the account refuses a turn with a limit before any output was streamed, the turn is retried automatically on the next account.
 - On a move, the Claude session transcript is copied to the new account's folder so the conversation keeps its context. The first turn after a move has a cold prompt cache, so it reads (and bills) the whole context again.
-- If no account is available, the proxy answers 429. That happens when every account is at a hard limit or over the threshold, not only at a hard limit. The message names the earliest time one frees up. When no reset time is known, it says the accounts are limited or signed out, and the retry-after is 10 minutes.
+- If no account is available, the proxy answers 429. That happens when every account is full or at a hard limit. The message names the earliest time one frees up. When no reset time is known, it says the accounts are limited or signed out, and the retry-after is 10 minutes.
 
 ## The usage card and Work Status
 
@@ -72,7 +73,7 @@ This is an independent community project, not affiliated with or endorsed by Ant
 
 - **macOS**: reads each account's Keychain item (the default folder uses `Claude Code-credentials`; other folders use a name derived from the folder path), falling back to the folder's `.credentials.json`. The first read may show a Keychain prompt.
 - **Windows**: reads `<folder>\.credentials.json`.
-- **Panel controls**: accounts are reordered with Move up / Move down in the "⋯" menu and the switch threshold is a text field (the design envisaged drag and drop and a slider).
+- **Panel controls**: accounts are reordered with Move up / Move down in the "⋯" menu (the design envisaged drag and drop).
 
 Windows status: the code paths are written for Windows. On windows-latest CI runs the shared, service and UI tests and the pool-specific plugin tests (`bun run test:plugin:windows`); the full plugin suite, whose forked tests use shell-script fake CLIs and symlinks, runs on macOS only. It has not been verified on a real Windows machine with real accounts. The UI has been tested headlessly (happy-dom), not yet visually in OpenChamber. The macOS end-to-end check in [docs/e2e-checklist.md](docs/e2e-checklist.md) is still to be run.
 

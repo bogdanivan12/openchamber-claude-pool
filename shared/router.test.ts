@@ -9,38 +9,40 @@ const NOW = 1_000_000;
 const win = (pct: number, resetsAt: number | null = NOW + 3600_000) => ({ usedPercent: pct, resetsAt, updatedAt: NOW });
 
 describe("router", () => {
-  it("availability honours enabled, needsLogin, limitedUntil and threshold per window", () => {
+  it("availability honours enabled, needsLogin, limitedUntil and full windows", () => {
     const s = emptyState();
-    expect(isAvailable(A, s.accounts.aaaaaa, 90, NOW)).toBe(true);
-    expect(isAvailable(acc("dddddd", 3, false), undefined, 90, NOW)).toBe(false);
+    expect(isAvailable(A, s.accounts.aaaaaa, NOW)).toBe(true);
+    expect(isAvailable(acc("dddddd", 3, false), undefined, NOW)).toBe(false);
     setNeedsLogin(s, "aaaaaa", true);
-    expect(isAvailable(A, s.accounts.aaaaaa, 90, NOW)).toBe(false);
+    expect(isAvailable(A, s.accounts.aaaaaa, NOW)).toBe(false);
     setNeedsLogin(s, "aaaaaa", false);
     markLimited(s, "aaaaaa", NOW + 10);
-    expect(isAvailable(A, s.accounts.aaaaaa, 90, NOW)).toBe(false);
-    expect(isAvailable(A, s.accounts.aaaaaa, 90, NOW + 11)).toBe(true);
-    recordWindow(s, "bbbbbb", "seven_day", win(92));
-    expect(isAvailable(B, s.accounts.bbbbbb, 90, NOW)).toBe(false);
+    expect(isAvailable(A, s.accounts.aaaaaa, NOW)).toBe(false);
+    expect(isAvailable(A, s.accounts.aaaaaa, NOW + 11)).toBe(true);
+    recordWindow(s, "bbbbbb", "seven_day", win(99));
+    expect(isAvailable(B, s.accounts.bbbbbb, NOW)).toBe(true);
+    recordWindow(s, "bbbbbb", "seven_day", win(100));
+    expect(isAvailable(B, s.accounts.bbbbbb, NOW)).toBe(false);
   });
 
   it("a window whose reset passed counts as empty", () => {
     const s = emptyState();
     recordWindow(s, "aaaaaa", "five_hour", win(99, NOW - 1));
-    expect(isAvailable(A, s.accounts.aaaaaa, 90, NOW)).toBe(true);
-    expect(headroom(s.accounts.aaaaaa, 90, NOW)).toBe(90);
+    expect(isAvailable(A, s.accounts.aaaaaa, NOW)).toBe(true);
+    expect(headroom(s.accounts.aaaaaa, NOW)).toBe(100);
   });
 
   it("headroom is the tightest window", () => {
     const s = emptyState();
     recordWindow(s, "aaaaaa", "five_hour", win(10));
     recordWindow(s, "aaaaaa", "seven_day", win(70));
-    expect(headroom(s.accounts.aaaaaa, 90, NOW)).toBe(20);
+    expect(headroom(s.accounts.aaaaaa, NOW)).toBe(30);
   });
 
   it("keeps the conversation's current account while it is available", () => {
     const s = emptyState();
     recordWindow(s, "bbbbbb", "five_hour", win(80));
-    const r = route({ accounts: [A, B], state: s, threshold: 90, now: NOW, current: "bbbbbb" });
+    const r = route({ accounts: [A, B], state: s, now: NOW, current: "bbbbbb" });
     expect(r.kind === "account" && r.account.id).toBe("bbbbbb");
   });
 
@@ -48,32 +50,32 @@ describe("router", () => {
     const s = emptyState();
     recordWindow(s, "aaaaaa", "five_hour", win(50));
     recordWindow(s, "bbbbbb", "five_hour", win(20));
-    let r = route({ accounts: [A, B, C], state: s, threshold: 90, now: NOW });
-    expect(r.kind === "account" && r.account.id).toBe("cccccc"); // no data = 90 headroom
-    r = route({ accounts: [A, B], state: s, threshold: 90, now: NOW });
+    let r = route({ accounts: [A, B, C], state: s, now: NOW });
+    expect(r.kind === "account" && r.account.id).toBe("cccccc"); // no data = 100 headroom
+    r = route({ accounts: [A, B], state: s, now: NOW });
     expect(r.kind === "account" && r.account.id).toBe("bbbbbb");
-    r = route({ accounts: [B, A], state: emptyState(), threshold: 90, now: NOW });
+    r = route({ accounts: [B, A], state: emptyState(), now: NOW });
     expect(r.kind === "account" && r.account.id).toBe("aaaaaa");
   });
 
   it("skips excluded and unavailable accounts and moves off a full current one", () => {
     const s = emptyState();
-    recordWindow(s, "aaaaaa", "five_hour", win(95));
-    const r = route({ accounts: [A, B], state: s, threshold: 90, now: NOW, current: "aaaaaa", exclude: new Set(["cccccc"]) });
+    recordWindow(s, "aaaaaa", "five_hour", win(100));
+    const r = route({ accounts: [A, B], state: s, now: NOW, current: "aaaaaa", exclude: new Set(["cccccc"]) });
     expect(r.kind === "account" && r.account.id).toBe("bbbbbb");
   });
 
   it("none available returns the earliest moment one frees up", () => {
     const s = emptyState();
     markLimited(s, "aaaaaa", NOW + 500);
-    recordWindow(s, "bbbbbb", "five_hour", win(99, NOW + 200));
-    expect(nextAvailableAt(B, s.accounts.bbbbbb, 90, NOW)).toBe(NOW + 200);
-    expect(route({ accounts: [A, B], state: s, threshold: 90, now: NOW })).toEqual({ kind: "none", retryAt: NOW + 200 });
+    recordWindow(s, "bbbbbb", "five_hour", win(100, NOW + 200));
+    expect(nextAvailableAt(B, s.accounts.bbbbbb, NOW)).toBe(NOW + 200);
+    expect(route({ accounts: [A, B], state: s, now: NOW })).toEqual({ kind: "none", retryAt: NOW + 200 });
   });
 
   it("none with only logged-out accounts has no retry time", () => {
     const s = emptyState();
     setNeedsLogin(s, "aaaaaa", true);
-    expect(route({ accounts: [A], state: s, threshold: 90, now: NOW })).toEqual({ kind: "none", retryAt: null });
+    expect(route({ accounts: [A], state: s, now: NOW })).toEqual({ kind: "none", retryAt: null });
   });
 });

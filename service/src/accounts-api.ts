@@ -1,7 +1,7 @@
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolveClaudeCli } from "../../plugin/src/executable-path.ts";
-import { MAX_THRESHOLD, MIN_THRESHOLD, enabledAccounts, newAccountId, readAccounts, updateAccounts, type Account } from "../../shared/accounts.ts";
+import { enabledAccounts, newAccountId, readAccounts, updateAccounts, type Account } from "../../shared/accounts.ts";
 import { readCredential } from "../../shared/creds.ts";
 import { accountsFile, isInsidePoolAccounts, normalizeDir, poolDataDir, sameDir } from "../../shared/paths.ts";
 import { isAvailable, route } from "../../shared/router.ts";
@@ -70,14 +70,13 @@ export function accountRoutes(deps: {
       const found = await cliFound();
       const file = readAccounts(dataDir);
       const state = readState(dataDir);
-      const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
+      const choice = route({ accounts: enabledAccounts(file), state, now: Date.now() });
       const nextChat = choice.kind === "account" ? choice.account.id : null;
       // "In use" = the account has conversations with a request in the last few minutes.
       const activeBy = activeConversations(state, Date.now());
       return {
         status: 200,
         body: {
-          threshold: file.threshold,
           cliFound: found,
           recoveredBackup: existsSync(`${accountsFile(dataDir)}.bak`),
           accounts: [...file.accounts].sort((a, b) => a.order - b.order).map((a) => ({
@@ -86,7 +85,7 @@ export function accountRoutes(deps: {
             poolActive: (activeBy[a.id] ?? 0) > 0,
             activeChats: activeBy[a.id] ?? 0,
             nextChat: a.id === nextChat,
-            available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
+            available: isAvailable(a, state.accounts[a.id], Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir),
           })),
         },
@@ -207,15 +206,6 @@ export function accountRoutes(deps: {
         }
       }
       return { status: 200, body: { ok: true, deletedLogin: false } };
-    },
-
-    "PUT /api/settings": (r) => {
-      const body = bodyObject(r);
-      if (!body) return NOT_OBJECT;
-      const t = body.threshold;
-      if (typeof t !== "number" || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD) return bad(`threshold must be ${MIN_THRESHOLD}..${MAX_THRESHOLD}`);
-      const f = updateAccounts((file) => { file.threshold = t; }, dataDir);
-      return { status: 200, body: { threshold: f.threshold } };
     },
   };
 }

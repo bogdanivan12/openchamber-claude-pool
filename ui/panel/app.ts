@@ -19,7 +19,7 @@ export function createPanel(host: PanelHost, root: Element, opts: { sleep?: (ms:
     data: null,
     loading: true,
     screen: { kind: "list" },
-    flows: { adding: null, renaming: null, removing: null, importing: null, threshold: null },
+    flows: { adding: null, renaming: null, removing: null, importing: null },
     notices: [],
     sleep: opts.sleep ?? realSleep,
     notify(n) {

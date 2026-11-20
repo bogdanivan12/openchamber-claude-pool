@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { accountKind, resetText, statusBadge, validateThreshold, windowPercent } from "./format.ts";
+import { accountKind, resetText, statusBadge, windowPercent } from "./format.ts";
 
 const NOW = Date.parse("2026-11-18T12:00:00Z");
 const base = { id: "aaaaaa", label: "a", configDir: "/a", order: 0, enabled: true, poolActive: false, canDeleteLogin: false };
@@ -22,16 +22,6 @@ describe("format", () => {
     expect(resetText(null, NOW)).toBe("");
     expect(resetText(NOW + 5 * 60_000, NOW)).toBe("resets in 5m");
     expect(resetText(NOW + 26 * 3600_000, NOW)).toBe("resets in 1d 2h");
-  });
-  it("validates the threshold text", () => {
-    expect(validateThreshold("90")).toEqual({ ok: true, value: 90 });
-    expect(validateThreshold(" 50 ")).toEqual({ ok: true, value: 50 });
-    expect(validateThreshold("100")).toEqual({ ok: true, value: 100 });
-    for (const bad of ["", "  ", "49", "101", "75.5", "abc", "9e1", "-60", "0x50"]) {
-      const r = validateThreshold(bad);
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error).toBe("Enter a whole number from 50 to 100.");
-    }
   });
 });
 

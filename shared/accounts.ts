@@ -5,9 +5,11 @@ import { z } from "zod";
 import { accountsFile, defaultConfigDir, lockFile, normalizeDir, poolDataDir, sameDir } from "./paths.ts";
 import { readJsonFile, sleepSync, withLock, writeJsonAtomic } from "./store-io.ts";
 
-export const DEFAULT_THRESHOLD = 90;
-export const MIN_THRESHOLD = 50;
-export const MAX_THRESHOLD = 100;
+/**
+ * The switch threshold is gone: the pool uses accounts up to their real limit. The field stays in
+ * accounts.json, always 100, because versions up to 0.3.x require it and would quarantine a file without it.
+ */
+const LEGACY_THRESHOLD = 100;
 
 const accountSchema = z.object({
   id: z.string().regex(/^[0-9a-f]{6}$/),
@@ -21,13 +23,13 @@ const accountSchema = z.object({
 const fileSchema = z.object({
   version: z.literal(1),
   accounts: z.array(accountSchema),
-  threshold: z.number().int().min(MIN_THRESHOLD).max(MAX_THRESHOLD),
+  threshold: z.number().optional(),
 });
 
 export type Account = z.infer<typeof accountSchema>;
 export type AccountsFile = z.infer<typeof fileSchema>;
 
-export const emptyAccounts = (): AccountsFile => ({ version: 1, accounts: [], threshold: DEFAULT_THRESHOLD });
+export const emptyAccounts = (): AccountsFile => ({ version: 1, accounts: [], threshold: LEGACY_THRESHOLD });
 
 class CorruptError extends Error {}
 
@@ -125,6 +127,7 @@ export function updateAccounts(mutate: (file: AccountsFile) => void, dataDir: st
   return withLock(lockFile(dataDir), () => {
     const file = loadLocked(accountsFile(dataDir));
     mutate(file);
+    file.threshold = LEGACY_THRESHOLD;
     checkConfigDirs(file);
     for (const a of file.accounts) a.configDir = normalizeDir(a.configDir);
     if (file.accounts.some((a, i) => file.accounts.some((b, j) => i < j && sameDir(a.configDir, b.configDir)))) {

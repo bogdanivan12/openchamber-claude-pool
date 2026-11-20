@@ -17,7 +17,7 @@ export type Notice = {
   /** Runs when the user dismisses the banner. */
   onDismiss?: () => void;
 };
-export type ListData = { accounts: AccountView[]; threshold: number; recoveredBackup: boolean; cliFound: boolean };
+export type ListData = { accounts: AccountView[]; recoveredBackup: boolean; cliFound: boolean };
 export type AwaitingCode = Extract<LoginView, { state: "awaiting-code" }>;
 
 /** Which full-page screen is showing. The list is the default. */
@@ -34,7 +34,6 @@ export type Flows = {
   renaming: { id: string; text: string; error?: string } | null;
   removing: { id: string; deleteLogin: boolean } | null;
   importing: { candidates: string[]; selected: Set<string> } | null;
-  threshold: { text: string; error?: string } | null;
 };
 
 export type Ctx = {

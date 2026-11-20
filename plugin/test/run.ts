@@ -37,8 +37,9 @@ for (const file of files) {
     stdout: "pipe",
     stderr: "pipe",
     // Suites run as plain OpenCode, whatever terminal started them;
-    // host-regression covers OpenChamber.
-    env: { ...process.env, OPENCHAMBER_RUNTIME: "" },
+    // host-regression covers OpenChamber. Usage refresh before routing is
+    // off so no suite reads real logins; pool-usage-refresh turns it on itself.
+    env: { ...process.env, OPENCHAMBER_RUNTIME: "", CLAUDE_POOL_USAGE_REFRESH: "off" },
   });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),

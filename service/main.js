@@ -6215,9 +6215,7 @@ function withLock(lockPath, fn, opts = {}) {
 }
 
 // shared/accounts.ts
-var DEFAULT_THRESHOLD = 90;
-var MIN_THRESHOLD = 50;
-var MAX_THRESHOLD = 100;
+var LEGACY_THRESHOLD = 100;
 var accountSchema = object({
   id: string2().regex(/^[0-9a-f]{6}$/),
   label: string2().trim().min(1).max(40),
@@ -6230,9 +6228,9 @@ var accountSchema = object({
 var fileSchema = object({
   version: literal(1),
   accounts: array(accountSchema),
-  threshold: number2().int().min(MIN_THRESHOLD).max(MAX_THRESHOLD)
+  threshold: number2().optional()
 });
-var emptyAccounts = () => ({ version: 1, accounts: [], threshold: DEFAULT_THRESHOLD });
+var emptyAccounts = () => ({ version: 1, accounts: [], threshold: LEGACY_THRESHOLD });
 
 class CorruptError extends Error {
 }
@@ -6321,6 +6319,7 @@ function updateAccounts(mutate, dataDir = poolDataDir()) {
   return withLock(lockFile(dataDir), () => {
     const file = loadLocked(accountsFile(dataDir));
     mutate(file);
+    file.threshold = LEGACY_THRESHOLD;
     checkConfigDirs(file);
     for (const a of file.accounts)
       a.configDir = normalizeDir(a.configDir);
@@ -6399,25 +6398,26 @@ async function readCredential(configDir, deps = {}) {
 }
 
 // shared/router.ts
+var FULL_PERCENT = 100;
 var liveWindows = (st, now) => Object.values(st?.windows ?? {}).filter((w) => !!w && (w.resetsAt === null || w.resetsAt > now));
-function isAvailable(account, st, threshold, now) {
+function isAvailable(account, st, now) {
   if (!account.enabled || st?.needsLogin)
     return false;
   if (st?.limitedUntil != null && st.limitedUntil > now)
     return false;
-  return liveWindows(st, now).every((w) => w.usedPercent < threshold);
+  return liveWindows(st, now).every((w) => w.usedPercent < FULL_PERCENT);
 }
-function headroom(st, threshold, now) {
-  return Math.min(threshold, ...liveWindows(st, now).map((w) => threshold - w.usedPercent));
+function headroom(st, now) {
+  return Math.min(FULL_PERCENT, ...liveWindows(st, now).map((w) => FULL_PERCENT - w.usedPercent));
 }
-function nextAvailableAt(account, st, threshold, now) {
+function nextAvailableAt(account, st, now) {
   if (!account.enabled || st?.needsLogin)
     return null;
   let at = now;
   if (st?.limitedUntil != null && st.limitedUntil > at)
     at = st.limitedUntil;
   for (const w of liveWindows(st, now)) {
-    if (w.usedPercent < threshold)
+    if (w.usedPercent < FULL_PERCENT)
       continue;
     if (w.resetsAt === null)
       return null;
@@ -6426,17 +6426,17 @@ function nextAvailableAt(account, st, threshold, now) {
   return at;
 }
 function route(input) {
-  const { accounts, state, threshold, now, current, exclude } = input;
+  const { accounts, state, now, current, exclude } = input;
   const candidates = accounts.filter((a) => !exclude?.has(a.id));
-  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], threshold, now));
+  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], now));
   const sticky = current ? available.find((a) => a.id === current) : undefined;
   if (sticky)
     return { kind: "account", account: sticky };
   if (available.length > 0) {
-    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], threshold, now) - headroom(state.accounts[a.id], threshold, now) || a.order - b.order)[0];
+    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], now) - headroom(state.accounts[a.id], now) || a.order - b.order)[0];
     return { kind: "account", account: best };
   }
-  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], threshold, now)).filter((t) => t !== null);
+  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], now)).filter((t) => t !== null);
   return { kind: "none", retryAt: times.length ? Math.min(...times) : null };
 }
 
@@ -6447,7 +6447,8 @@ var windowSchema = object({ usedPercent: number2().min(0).max(100), resetsAt: nu
 var accountSchema2 = looseObject({
   windows: object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
   limitedUntil: number2().nullable(),
-  needsLogin: boolean2()
+  needsLogin: boolean2(),
+  usageCooldownUntil: number2().optional()
 });
 var stateSchema = looseObject({
   version: literal(1),
@@ -6664,13 +6665,12 @@ function accountRoutes(deps = {}) {
       const found = await cliFound();
       const file = readAccounts(dataDir);
       const state = readState(dataDir);
-      const choice = route({ accounts: enabledAccounts(file), state, threshold: file.threshold, now: Date.now() });
+      const choice = route({ accounts: enabledAccounts(file), state, now: Date.now() });
       const nextChat = choice.kind === "account" ? choice.account.id : null;
       const activeBy = activeConversations(state, Date.now());
       return {
         status: 200,
         body: {
-          threshold: file.threshold,
           cliFound: found,
           recoveredBackup: existsSync3(`${accountsFile(dataDir)}.bak`),
           accounts: [...file.accounts].sort((a, b) => a.order - b.order).map((a) => ({
@@ -6679,7 +6679,7 @@ function accountRoutes(deps = {}) {
             poolActive: (activeBy[a.id] ?? 0) > 0,
             activeChats: activeBy[a.id] ?? 0,
             nextChat: a.id === nextChat,
-            available: isAvailable(a, state.accounts[a.id], file.threshold, Date.now()),
+            available: isAvailable(a, state.accounts[a.id], Date.now()),
             canDeleteLogin: isInsidePoolAccounts(a.configDir, dataDir)
           }))
         }
@@ -6814,18 +6814,6 @@ function accountRoutes(deps = {}) {
         }
       }
       return { status: 200, body: { ok: true, deletedLogin: false } };
-    },
-    "PUT /api/settings": (r) => {
-      const body = bodyObject(r);
-      if (!body)
-        return NOT_OBJECT;
-      const t = body.threshold;
-      if (typeof t !== "number" || !Number.isInteger(t) || t < MIN_THRESHOLD || t > MAX_THRESHOLD)
-        return bad(`threshold must be ${MIN_THRESHOLD}..${MAX_THRESHOLD}`);
-      const f = updateAccounts((file) => {
-        file.threshold = t;
-      }, dataDir);
-      return { status: 200, body: { threshold: f.threshold } };
     }
   };
 }
@@ -7490,7 +7478,7 @@ function planSummary(reads, accounts) {
   return counts.size ? [...counts].map(([n, c]) => `${n} ×${c}`).join(", ") : null;
 }
 function buildQuotaAnswer(input) {
-  const { accounts, state, threshold, now, reads } = input;
+  const { accounts, state, now, reads } = input;
   if (accounts.length === 0) {
     return { ok: false, configured: true, error: "No Claude accounts yet. Add one in the Claude Pool panel.", usage: null };
   }
@@ -7514,7 +7502,7 @@ function buildQuotaAnswer(input) {
     const firstError = Object.values(reads).find((r) => !r.ok)?.error ?? "No usage data yet.";
     return { ok: false, configured: true, error: firstError.slice(0, 2000), planLabel: planSummary(reads, accounts), usage: null };
   }
-  const routed = route({ accounts, state, threshold, now });
+  const routed = route({ accounts, state, now });
   const top = routed.kind === "account" ? routed.account : accounts.find((a) => Object.keys(windowsOf(state.accounts[a.id], now)).length > 0) ?? accounts[0];
   return {
     ok: true,
@@ -7524,7 +7512,7 @@ function buildQuotaAnswer(input) {
   };
 }
 
-// service/src/usage.ts
+// shared/usage.ts
 var USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 var BETA = "oauth-2025-04-20";
 var DEFAULT_COOLDOWN_MS = 5 * 60000;
@@ -7560,6 +7548,7 @@ function parseUsagePayload(payload) {
   }
   return { ok: true, windows, plan: null };
 }
+var coolingDown = (account, plan) => ({ ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` });
 async function readAccountUsage(account, deps = {}) {
   const now = (deps.now ?? Date.now)();
   const doFetch = deps.fetch ?? fetch;
@@ -7580,18 +7569,19 @@ async function readAccountUsage(account, deps = {}) {
     return { ok: false, plan, error: `${account.label}: the token expired; Claude Code renews it on this account's next turn.` };
   }
   if ((cooldownUntil.get(account.id) ?? 0) > now)
-    return { ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` };
+    return coolingDown(account, plan);
   let res;
   try {
-    res = await doFetch(USAGE_URL, { headers: { authorization: `Bearer ${cred.accessToken}`, "anthropic-beta": BETA }, signal: AbortSignal.timeout(8000) });
+    res = await doFetch(USAGE_URL, { headers: { authorization: `Bearer ${cred.accessToken}`, "anthropic-beta": BETA }, signal: AbortSignal.timeout(deps.timeoutMs ?? 8000) });
   } catch (err) {
     return { ok: false, plan, error: `${account.label}: ${err instanceof Error ? err.message : "request failed"}` };
   }
   if (res.status === 429) {
     const h = res.headers.get("retry-after");
     const ra = h === null || h.trim() === "" ? NaN : Number(h);
-    cooldownUntil.set(account.id, now + (Number.isFinite(ra) && ra >= 0 ? Math.min(ra * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS));
-    return { ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` };
+    const until = now + (Number.isFinite(ra) && ra >= 0 ? Math.min(ra * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS);
+    cooldownUntil.set(account.id, until);
+    return { ...coolingDown(account, plan), cooldownUntil: until };
   }
   if (res.status === 401)
     return { ok: false, needsLogin: true, plan, error: `${account.label}: session expired. Sign in again in the Claude Pool panel.` };
@@ -7605,9 +7595,13 @@ async function readAccountUsage(account, deps = {}) {
     return { ok: false, plan, error: `${account.label}: unexpected response from Anthropic` };
   }
 }
-async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
-  const accounts = enabledAccounts(readAccounts(dataDir));
-  const reads = await Promise.all(accounts.map((a) => readAccountUsage(a, deps)));
+async function refreshUsage(accounts, dataDir = poolDataDir(), deps = {}) {
+  const before = readState(dataDir);
+  const startedAt = (deps.now ?? Date.now)();
+  const reads = await Promise.all(accounts.map((a) => {
+    const shared = before.accounts[a.id]?.usageCooldownUntil ?? 0;
+    return shared > startedAt ? Promise.resolve(coolingDown(a, a.plan ?? null)) : readAccountUsage(a, deps);
+  }));
   const now = (deps.now ?? Date.now)();
   const out = {};
   const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
@@ -7623,12 +7617,17 @@ async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
           recordWindow(s, a.id, name, { ...w, updatedAt: now });
       } else if (r.needsLogin) {
         setNeedsLogin(s, a.id, true);
+      } else if (r.cooldownUntil !== undefined) {
+        accountState(s, a.id).usageCooldownUntil = r.cooldownUntil;
       }
     });
   }, dataDir, now);
   return out;
 }
-
+async function refreshAllUsage(dataDir = poolDataDir(), deps = {}) {
+  return refreshUsage(enabledAccounts(readAccounts(dataDir)), dataDir, deps);
+}
+var STALE_USAGE_MS = 2 * 60000;
 // service/src/quota-route.ts
 function quotaRoute(deps = {}) {
   const { dataDir = poolDataDir(), ...usageDeps } = deps;
@@ -7637,7 +7636,7 @@ function quotaRoute(deps = {}) {
       return { status: 400, body: { error: "not a usage call this service understands" } };
     const reads = await refreshAllUsage(dataDir, usageDeps);
     const file = readAccounts(dataDir);
-    const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(dataDir), threshold: file.threshold, now: (usageDeps.now ?? Date.now)(), reads });
+    const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(dataDir), now: (usageDeps.now ?? Date.now)(), reads });
     return { status: 200, body: { ok: true, data } };
   };
 }

@@ -3,15 +3,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  DEFAULT_THRESHOLD, emptyAccounts, enabledAccounts, findByConfigDir,
+  emptyAccounts, enabledAccounts, findByConfigDir,
   newAccountId, readAccounts, readWithRetry, updateAccounts,
 } from "./accounts.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "pool-acc-"));
 
 describe("accounts", () => {
-  it("missing file reads as empty with the default threshold", () => {
-    expect(readAccounts(dir())).toEqual({ version: 1, accounts: [], threshold: DEFAULT_THRESHOLD });
+  it("missing file reads as empty with the legacy threshold field at 100", () => {
+    expect(readAccounts(dir())).toEqual({ version: 1, accounts: [], threshold: 100 });
+  });
+
+  it("an old threshold is accepted on read and written back as 100, so older versions still parse the file", () => {
+    const d = dir();
+    writeFileSync(join(d, "accounts.json"), JSON.stringify({ version: 1, accounts: [], threshold: 90 }));
+    expect(readAccounts(d).accounts).toEqual([]);
+    updateAccounts(() => {}, d);
+    expect(JSON.parse(readFileSync(join(d, "accounts.json"), "utf8")).threshold).toBe(100);
+    writeFileSync(join(d, "accounts.json"), JSON.stringify({ version: 1, accounts: [] }));
+    expect(readdirSync(d).some((n) => n.includes(".bak"))).toBe(false);
+    expect(readAccounts(d)).toEqual({ version: 1, accounts: [] });
   });
 
   it("update persists and normalizes config dirs", () => {
@@ -30,9 +41,8 @@ describe("accounts", () => {
     expect(existsSync(join(d, "accounts.json.bak"))).toBe(true);
   });
 
-  it("rejects invalid ids, labels and thresholds", () => {
+  it("rejects invalid ids and labels", () => {
     const d = dir();
-    expect(() => updateAccounts((f) => { f.threshold = 20; }, d)).toThrow();
     expect(() => updateAccounts((f) => {
       f.accounts.push({ id: "XYZ", label: "x", configDir: "/x", order: 0, enabled: true });
     }, d)).toThrow();
@@ -101,7 +111,7 @@ describe("accounts", () => {
       const d = dir();
       mkdirSync(join(d, "accounts.json"));
       expect(readAccounts(d).accounts).toEqual([]);
-      expect(() => updateAccounts((f) => { f.threshold = 80; }, d)).toThrow();
+      expect(() => updateAccounts(() => {}, d)).toThrow();
       expect(existsSync(join(d, "accounts.json.bak"))).toBe(false);
       expect(readdirSync(d).some((n) => n.startsWith("accounts.json.bak"))).toBe(false);
     } finally { warn.mockRestore(); }
@@ -109,8 +119,8 @@ describe("accounts", () => {
 
   it("a valid file is never renamed", () => {
     const d = dir();
-    updateAccounts((f) => { f.threshold = 80; }, d);
-    expect(readAccounts(d).threshold).toBe(80);
+    updateAccounts(() => {}, d);
+    expect(readAccounts(d).threshold).toBe(100);
     expect(readdirSync(d).some((n) => n.includes(".bak"))).toBe(false);
   });
 

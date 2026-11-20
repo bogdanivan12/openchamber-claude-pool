@@ -127,7 +127,7 @@ try {
   });
   assert.notEqual(res.status, 400); await res.text();
 
-  // 8. G1: a parked bridge keeps its own account even when that account is over threshold
+  // 8. G1: a parked bridge keeps its own account even when that account is full
   const { handlePoolChat, setMigrationHook } = await import("../src/pool-proxy.ts");
   const { installTranscriptMigration } = await import("../src/migrate.ts");
   const { putBridge, deleteBridge } = await import("../src/bridge-pool.ts");
@@ -162,7 +162,7 @@ try {
   calls.length = 0;
   updateState((s) => bindConversation(s, "s-title", "bbbbbb", t0), home);
   await handlePoolChat(mk("s-title", "title"), {}, fake, home);
-  assert.deepEqual(calls, [encodeURIComponent(B_DIR)], "a bound account that is not limited is kept, threshold aside");
+  assert.deepEqual(calls, [encodeURIComponent(B_DIR)], "a bound account that is not limited is kept, usage aside");
   updateState((s) => markLimited(s, "bbbbbb", Date.now() + 3600_000), home);
   calls.length = 0;
   await handlePoolChat(mk("s-title", "title"), {}, fake, home);

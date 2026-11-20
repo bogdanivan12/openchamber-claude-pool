@@ -199,7 +199,7 @@ describe("status section smoke test (happy-dom, fake service)", () => {
         setHeight: async () => {},
       };
       createStatus(host as never, root);
-      const list = (name: string) => ({ accounts: [account(name, name)], threshold: 90, recoveredBackup: false, cliFound: true });
+      const list = (name: string) => ({ accounts: [account(name, name)], recoveredBackup: false, cliFound: true });
       return { pending, list };
     }
     const refreshBtn = () => Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.trim() === "↻") as HTMLButtonElement;

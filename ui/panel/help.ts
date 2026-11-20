@@ -16,15 +16,15 @@ export const FAQ: FaqGroup[] = [
       {
         q: "Which account does a new chat start on?",
         a: [
-          "An account counts as available when it is switched on (“In pool”), signed in, not at a limit, and below the switch threshold in both its 5-hour and 7-day windows.",
-          "Among the available accounts a new chat gets the one with the most room left before the threshold, counted on its fuller window (5-hour or weekly). A tie goes to the account higher in the list (reorder with Move up / Move down in the account’s ⋯ menu).",
+          "An account counts as available when it is switched on (“In pool”), signed in, not at a limit, and below 100% in both its 5-hour and 7-day windows.",
+          "Among the available accounts a new chat gets the one with the most room left, counted on its fuller window (5-hour or weekly). A tie goes to the account higher in the list (reorder with Move up / Move down in the account’s ⋯ menu).",
           "The account marked “Next for new chats” is the one a new chat would get right now.",
         ],
       },
       {
         q: "When does a running chat move to another account?",
         a: [
-          "Never without a reason. A chat stays on its account, which keeps Claude's prompt cache warm and is cheaper, until that account passes the threshold or hits a limit.",
+          "Never without a reason. A chat stays on its account, which keeps Claude's prompt cache warm and is cheaper, until that account is full or hits a limit.",
           "The check happens when you send a message, not in the middle of an answer that is already streaming.",
         ],
       },
@@ -59,16 +59,9 @@ export const FAQ: FaqGroup[] = [
         ],
       },
       {
-        q: "An account is under its real limit but the pool says everything is full. Why?",
+        q: "Can a long answer run into the limit halfway?",
         a: [
-          "The pool treats an account as full once it passes the switch threshold (90% by default), not only at the hard limit, so a chat never runs an account completely dry.",
-          "To use accounts all the way to the limit, raise “Switch accounts at” to 100. Or pick “Claude · name” in the model picker: that provider ignores the pool and always uses its own account.",
-        ],
-      },
-      {
-        q: "What does the switch threshold do?",
-        a: [
-          "It is the share (50 to 100%) of the 5-hour or weekly window at which an account stops being chosen. Lower values spread the load across accounts sooner; higher values drain one account before moving on. 90 is a sensible default.",
+          "Yes, rarely. The pool uses each account up to its real limit, and the numbers it checks are from before the message: what the answer itself uses is not known in advance. If the limit hits halfway through an answer, OpenChamber shows a retryable error and its retry lands on the next account.",
         ],
       },
       {
@@ -92,7 +85,7 @@ export const FAQ: FaqGroup[] = [
       {
         q: "Where do the usage numbers come from, and how fresh are they?",
         a: [
-          "From Anthropic's usage endpoint, read with each account's own login, plus the rate-limit information Claude sends during chats. They refresh when you open this panel or press Refresh (at most every 45 seconds). Nothing polls in the background and no daemon is left running.",
+          "From Anthropic's usage endpoint, read with each account's own login, plus the rate-limit information Claude sends during chats. They refresh when you open this panel or press Refresh (at most every 45 seconds), and before a Claude Pool message picks an account when the numbers are more than 2 minutes old and the account is close to full (or the chat is new). That check waits at most 1.5 seconds; a slower answer is used for the next message. Nothing polls in the background and no daemon is left running.",
         ],
       },
       {

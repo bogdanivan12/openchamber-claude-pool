@@ -266,19 +266,11 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     expect(text(root)).toContain("homee");
   });
 
-  it("threshold: invalid input shows an error, keeps it across re-render, and never calls the API", async () => {
+  it("has no switch threshold setting", async () => {
+    svc.accounts = [account("a1", "work")];
     await open();
-    await typeInto(root, "Switch accounts at", "150");
-    await click(root, "Save");
-    expect(svc.requests.filter((r) => r.method === "PUT")).toHaveLength(0);
-    expect(fieldNote(root, "Switch accounts at")).toBe("Enter a whole number from 50 to 100.");
-    ctx.render();
-    expect(fieldNote(root, "Switch accounts at")).toBe("Enter a whole number from 50 to 100.");
-    await typeInto(root, "Switch accounts at", "80");
-    expect(fieldNote(root, "Switch accounts at")).not.toContain("whole number");
-    await click(root, "Save");
-    expect(svc.find("PUT", "/api/settings")[0].body).toEqual({ threshold: 80 });
-    expect(svc.threshold).toBe(80);
+    expect(text(root)).not.toContain("Switching");
+    expect(text(root)).not.toContain("Switch accounts at");
   });
 
   it("enabling toggle, reorder and refresh hit the API", async () => {

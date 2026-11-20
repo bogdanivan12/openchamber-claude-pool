@@ -45,13 +45,12 @@ async function call<T>(host: Host, method: string, path: string, body?: unknown,
 const id = encodeURIComponent;
 
 export const api = (host: Host) => ({
-  list: () => call<{ accounts: AccountView[]; threshold: number; recoveredBackup: boolean; cliFound: boolean }>(host, "GET", "/api/accounts"),
+  list: () => call<{ accounts: AccountView[]; recoveredBackup: boolean; cliFound: boolean }>(host, "GET", "/api/accounts"),
   candidates: () => call<{ candidates: string[] }>(host, "GET", "/api/import-candidates"),
   import: (configDirs: string[]) => call<{ added: unknown[]; skipped: { configDir: string; reason: string }[] }>(host, "POST", "/api/import", { configDirs }),
   patch: (accountId: string, p: { label?: string; enabled?: boolean }) => call<unknown>(host, "PATCH", `/api/accounts/${id(accountId)}`, p),
   reorder: (ids: string[]) => call<unknown>(host, "POST", "/api/accounts/reorder", { ids }),
   remove: (accountId: string, deleteLogin: boolean) => call<{ ok: boolean; deletedLogin: boolean; warning?: string }>(host, "DELETE", `/api/accounts/${id(accountId)}`, undefined, deleteLogin ? { deleteLogin: "1" } : undefined),
-  setThreshold: (threshold: number) => call<unknown>(host, "PUT", "/api/settings", { threshold }),
   ackBackup: () => call<{ ok: true }>(host, "POST", "/api/accounts/ack-backup"),
   loginStart: (p: { label: string } | { accountId: string }) => call<LoginView>(host, "POST", "/api/login/start", p),
   loginCode: (code: string) => call<LoginView>(host, "POST", "/api/login/code", { code }),

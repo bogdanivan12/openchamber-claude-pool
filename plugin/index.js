@@ -54330,6 +54330,7 @@ import { existsSync as existsSync2, renameSync as renameSync2 } from "node:fs";
 init_zod();
 
 // shared/paths.ts
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, parse as parse5, relative, resolve, sep, isAbsolute } from "node:path";
 function poolDataDir(home = homedir()) {
@@ -54358,6 +54359,12 @@ function sameDir(a, b, home = homedir(), platform = process.platform) {
   return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 var isDefaultConfigDir = (dir, home = homedir(), platform = process.platform) => sameDir(dir, defaultConfigDir(home), home, platform);
+function keychainService(configDir, home = homedir()) {
+  if (isDefaultConfigDir(configDir, home))
+    return "Claude Code-credentials";
+  const hash = createHash("sha256").update(normalizeDir(configDir, home)).digest("hex").slice(0, 8);
+  return `Claude Code-credentials-${hash}`;
+}
 
 // shared/store-io.ts
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
@@ -54458,9 +54465,7 @@ function withLock(lockPath, fn, opts = {}) {
 }
 
 // shared/accounts.ts
-var DEFAULT_THRESHOLD = 90;
-var MIN_THRESHOLD = 50;
-var MAX_THRESHOLD = 100;
+var LEGACY_THRESHOLD = 100;
 var accountSchema = object({
   id: string2().regex(/^[0-9a-f]{6}$/),
   label: string2().trim().min(1).max(40),
@@ -54473,9 +54478,9 @@ var accountSchema = object({
 var fileSchema = object({
   version: literal(1),
   accounts: array(accountSchema),
-  threshold: number2().int().min(MIN_THRESHOLD).max(MAX_THRESHOLD)
+  threshold: number2().optional()
 });
-var emptyAccounts = () => ({ version: 1, accounts: [], threshold: DEFAULT_THRESHOLD });
+var emptyAccounts = () => ({ version: 1, accounts: [], threshold: LEGACY_THRESHOLD });
 
 class CorruptError extends Error {
 }
@@ -55558,7 +55563,7 @@ async function clearAllBridges() {
 }
 
 // plugin/src/proxy.ts
-import { createHash as createHash3, randomUUID } from "node:crypto";
+import { createHash as createHash4, randomUUID } from "node:crypto";
 
 // plugin/src/host.ts
 function currentHost(env = process.env) {
@@ -55577,7 +55582,7 @@ import { homedir as homedir6 } from "node:os";
 import { dirname as dirname6, isAbsolute as isAbsolute3, join as join7, parse as parse8 } from "node:path";
 
 // plugin/src/prompt.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 function parseDataUrl(url) {
   const match = /^data:([^;,]+)?(?:;[^,]*)?;base64,(.+)$/i.exec(url.trim());
   if (!match)
@@ -55877,7 +55882,7 @@ function fingerprintedUserMessages(messages) {
     const identity = text || (contentHasAttachments(msg.content) ? "\x00attachments" : "");
     if (!identity)
       continue;
-    entries.push({ index: i, print: createHash("sha1").update(identity).digest("hex").slice(0, 16) });
+    entries.push({ index: i, print: createHash2("sha1").update(identity).digest("hex").slice(0, 16) });
   }
   return entries;
 }
@@ -56592,7 +56597,7 @@ function sessionContextBlocks(messages) {
 }
 
 // plugin/src/rate-limit.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync4, mkdirSync as mkdirSync6, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir7 } from "node:os";
 import { dirname as dirname7, join as join8 } from "node:path";
@@ -56605,7 +56610,7 @@ function storePath(configDir) {
   const path = override || join8(base, "opencode-claude", "rate-limit.json");
   if (!configDir)
     return path;
-  const account = createHash2("sha256").update(configDir).digest("hex").slice(0, 12);
+  const account = createHash3("sha256").update(configDir).digest("hex").slice(0, 12);
   return `${path.replace(/\.json$/, "")}-${account}.json`;
 }
 function readState(configDir) {
@@ -57505,7 +57510,8 @@ var windowSchema = object({ usedPercent: number2().min(0).max(100), resetsAt: nu
 var accountSchema2 = looseObject({
   windows: object({ five_hour: windowSchema.optional(), seven_day: windowSchema.optional() }),
   limitedUntil: number2().nullable(),
-  needsLogin: boolean2()
+  needsLogin: boolean2(),
+  usageCooldownUntil: number2().optional()
 });
 var stateSchema = looseObject({
   version: literal(1),
@@ -57547,6 +57553,9 @@ function recordWindow(s, id, name, w) {
 function markLimited(s, id, until) {
   const a = accountState(s, id);
   a.limitedUntil = Math.max(a.limitedUntil ?? 0, until);
+}
+function setNeedsLogin(s, id, value) {
+  accountState(s, id).needsLogin = value;
 }
 function bindConversation(s, key, id, now) {
   s.conversations[key] = { accountId: id, at: now, activeAt: now };
@@ -57612,25 +57621,26 @@ import { cpSync, existsSync as existsSync6, mkdirSync as mkdirSync8, renameSync 
 import { dirname as dirname9, join as join10, relative as relative2, resolve as resolve3 } from "node:path";
 
 // shared/router.ts
+var FULL_PERCENT = 100;
 var liveWindows = (st, now) => Object.values(st?.windows ?? {}).filter((w) => !!w && (w.resetsAt === null || w.resetsAt > now));
-function isAvailable(account, st, threshold, now) {
+function isAvailable(account, st, now) {
   if (!account.enabled || st?.needsLogin)
     return false;
   if (st?.limitedUntil != null && st.limitedUntil > now)
     return false;
-  return liveWindows(st, now).every((w) => w.usedPercent < threshold);
+  return liveWindows(st, now).every((w) => w.usedPercent < FULL_PERCENT);
 }
-function headroom(st, threshold, now) {
-  return Math.min(threshold, ...liveWindows(st, now).map((w) => threshold - w.usedPercent));
+function headroom(st, now) {
+  return Math.min(FULL_PERCENT, ...liveWindows(st, now).map((w) => FULL_PERCENT - w.usedPercent));
 }
-function nextAvailableAt(account, st, threshold, now) {
+function nextAvailableAt(account, st, now) {
   if (!account.enabled || st?.needsLogin)
     return null;
   let at = now;
   if (st?.limitedUntil != null && st.limitedUntil > at)
     at = st.limitedUntil;
   for (const w of liveWindows(st, now)) {
-    if (w.usedPercent < threshold)
+    if (w.usedPercent < FULL_PERCENT)
       continue;
     if (w.resetsAt === null)
       return null;
@@ -57639,17 +57649,17 @@ function nextAvailableAt(account, st, threshold, now) {
   return at;
 }
 function route(input) {
-  const { accounts, state, threshold, now, current, exclude } = input;
+  const { accounts, state, now, current, exclude } = input;
   const candidates = accounts.filter((a) => !exclude?.has(a.id));
-  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], threshold, now));
+  const available = candidates.filter((a) => isAvailable(a, state.accounts[a.id], now));
   const sticky = current ? available.find((a) => a.id === current) : undefined;
   if (sticky)
     return { kind: "account", account: sticky };
   if (available.length > 0) {
-    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], threshold, now) - headroom(state.accounts[a.id], threshold, now) || a.order - b.order)[0];
+    const best = [...available].sort((a, b) => headroom(state.accounts[b.id], now) - headroom(state.accounts[a.id], now) || a.order - b.order)[0];
     return { kind: "account", account: best };
   }
-  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], threshold, now)).filter((t) => t !== null);
+  const times = candidates.map((a) => nextAvailableAt(a, state.accounts[a.id], now)).filter((t) => t !== null);
   return { kind: "none", retryAt: times.length ? Math.min(...times) : null };
 }
 
@@ -57658,6 +57668,10 @@ init_constants();
 var migrationHook = null;
 function setMigrationHook(fn) {
   migrationHook = fn;
+}
+var usageFreshener = null;
+function setUsageFreshener(fn) {
+  usageFreshener = fn;
 }
 function withAccountDir(req, configDir) {
   const headers = new Headers(req.headers);
@@ -57733,8 +57747,8 @@ function trackActivity(res, dataDir, key, heartbeatMs = HEARTBEAT_MS) {
   });
   return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
-function earliestRetryAt(enabled, state, threshold, now) {
-  const all = route({ accounts: enabled, state, threshold, now });
+function earliestRetryAt(enabled, state, now) {
+  const all = route({ accounts: enabled, state, now });
   return all.kind === "none" ? all.retryAt : null;
 }
 var generalLimitResponse = () => Response.json({
@@ -57792,14 +57806,19 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
       return trackActivity(await handle(withAccountDir(req, previous.configDir), body), dataDir, sessionKey);
     }
   }
+  if (usageFreshener) {
+    try {
+      await usageFreshener(enabled, dataDir, !previous);
+    } catch {}
+  }
   for (let attempt = 0;attempt < enabled.length; attempt++) {
     const now = Date.now();
     const state = readState2(dataDir);
-    const choice = route({ accounts: enabled, state, threshold: file.threshold, now, current: previous?.id, exclude: tried });
+    const choice = route({ accounts: enabled, state, now, current: previous?.id, exclude: tried });
     if (choice.kind === "none") {
       if (tried.size === 0)
         return poolLimitResponse(choice.retryAt);
-      return exhausted(enabled, state, file.threshold);
+      return exhausted(enabled, state);
     }
     const account = choice.account;
     if (sessionKey && primary) {
@@ -57826,11 +57845,11 @@ async function handlePoolChat(req, body, handle, dataDir = poolDataDir()) {
     tried.add(account.id);
     previous = account;
   }
-  return exhausted(enabled, readState2(dataDir), file.threshold);
+  return exhausted(enabled, readState2(dataDir));
 }
-function exhausted(enabled, state, threshold) {
-  const at = earliestRetryAt(enabled, state, threshold, Date.now());
-  if (at === null && route({ accounts: enabled, state, threshold, now: Date.now() }).kind === "account")
+function exhausted(enabled, state) {
+  const at = earliestRetryAt(enabled, state, Date.now());
+  if (at === null && route({ accounts: enabled, state, now: Date.now() }).kind === "account")
     return generalLimitResponse();
   return poolLimitResponse(at);
 }
@@ -57876,6 +57895,228 @@ function installTranscriptMigration() {
     const moved = migrateTranscript(sid, fromDir, toDir);
     log.info("[claude-pool] moved the Claude session to the new account", { sessionKey, moved });
   });
+}
+
+// shared/creds.ts
+import { execFile } from "node:child_process";
+import { readFileSync as readFileSync7 } from "node:fs";
+import { homedir as homedir9 } from "node:os";
+import { join as join11 } from "node:path";
+var defaultExec = (file, args) => new Promise((resolve, reject) => {
+  execFile(file, args, { timeout: 1e4, encoding: "utf8", windowsHide: true }, (err, stdout) => err ? reject(err) : resolve(stdout));
+});
+function parseCredentialBlob(raw) {
+  try {
+    const oauth = JSON.parse(raw.trim())?.claudeAiOauth;
+    if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken)
+      return null;
+    return {
+      accessToken: oauth.accessToken,
+      expiresAt: typeof oauth.expiresAt === "number" ? oauth.expiresAt : null,
+      subscriptionType: typeof oauth.subscriptionType === "string" ? oauth.subscriptionType : null
+    };
+  } catch {
+    return null;
+  }
+}
+var errCode = (err) => err?.code;
+async function readCredentialDetailed(configDir, deps = {}) {
+  const platform = deps.platform ?? process.platform;
+  const home = deps.home ?? homedir9();
+  const exec = deps.exec ?? defaultExec;
+  const readFile = deps.readFile ?? ((p) => readFileSync7(p, "utf8"));
+  const dir = platform === "win32" ? configDir : normalizeDir(configDir, home);
+  let message;
+  if (platform === "darwin") {
+    try {
+      const cred = parseCredentialBlob(await exec("security", ["find-generic-password", "-s", keychainService(dir, home), "-w"]));
+      if (cred)
+        return { cred };
+    } catch (err) {
+      const code = errCode(err);
+      if (code !== 44)
+        message = `Keychain access failed (exit ${code ?? "unknown"})`;
+    }
+  }
+  try {
+    const cred = parseCredentialBlob(readFile(join11(dir, ".credentials.json")));
+    if (cred)
+      return { cred };
+  } catch (err) {
+    const code = errCode(err);
+    if (code !== "ENOENT")
+      message ??= `credentials file unreadable (${typeof code === "string" ? code : "I/O error"})`;
+  }
+  return message === undefined ? { cred: null, reason: "not-found" } : { cred: null, reason: "error", message };
+}
+
+// shared/usage.ts
+var USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+var BETA = "oauth-2025-04-20";
+var DEFAULT_COOLDOWN_MS = 5 * 60000;
+var MAX_COOLDOWN_MS = 60 * 60000;
+var cooldownUntil = new Map;
+var toTime = (v) => {
+  if (typeof v === "number")
+    return v > 1000000000000 ? v : v * 1000;
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+};
+var pct = (v) => typeof v === "number" && Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : null;
+function parseUsagePayload(payload) {
+  const p = payload ?? {};
+  const windows = {};
+  const put = (name, percent, reset) => {
+    if (percent !== null)
+      windows[name] = { usedPercent: percent, resetsAt: toTime(reset) };
+  };
+  if (Array.isArray(p.limits) && p.limits.length > 0) {
+    for (const l of p.limits) {
+      if (l?.kind === "session")
+        put("five_hour", pct(l.percent), l.resets_at);
+      if (l?.kind === "weekly_all")
+        put("seven_day", pct(l.percent), l.resets_at);
+    }
+  } else {
+    put("five_hour", pct(p.five_hour?.utilization), p.five_hour?.resets_at);
+    put("seven_day", pct(p.seven_day?.utilization), p.seven_day?.resets_at);
+  }
+  return { ok: true, windows, plan: null };
+}
+var coolingDown = (account, plan) => ({ ok: false, plan, error: `${account.label}: Anthropic rate-limited usage reads; retrying soon.` });
+async function readAccountUsage(account, deps = {}) {
+  const now = (deps.now ?? Date.now)();
+  const doFetch = deps.fetch ?? fetch;
+  let read;
+  try {
+    read = deps.readCredentialDetailed ? await deps.readCredentialDetailed(account.configDir) : deps.readCredential ? await deps.readCredential(account.configDir).then((cred) => cred ? { cred } : { cred: null, reason: "not-found" }) : await readCredentialDetailed(account.configDir);
+  } catch (err) {
+    return { ok: false, plan: null, error: `${account.label}: could not read the login (${err instanceof Error ? err.message.slice(0, 200) : "unknown error"})` };
+  }
+  const cred = read.cred;
+  if (!cred && read.reason === "error") {
+    return { ok: false, plan: null, error: `${account.label}: could not read this account's login (${read.message ?? "unknown error"}). If macOS asked for Keychain access, allow it; reload to retry.` };
+  }
+  if (!cred)
+    return { ok: false, needsLogin: true, plan: null, error: `No Claude login found (or the Keychain denied access) for ${account.label}. Sign in again in the Claude Pool panel.` };
+  const plan = cred.subscriptionType;
+  if (cred.expiresAt !== null && cred.expiresAt > 0 && cred.expiresAt <= now) {
+    return { ok: false, plan, error: `${account.label}: the token expired; Claude Code renews it on this account's next turn.` };
+  }
+  if ((cooldownUntil.get(account.id) ?? 0) > now)
+    return coolingDown(account, plan);
+  let res;
+  try {
+    res = await doFetch(USAGE_URL, { headers: { authorization: `Bearer ${cred.accessToken}`, "anthropic-beta": BETA }, signal: AbortSignal.timeout(deps.timeoutMs ?? 8000) });
+  } catch (err) {
+    return { ok: false, plan, error: `${account.label}: ${err instanceof Error ? err.message : "request failed"}` };
+  }
+  if (res.status === 429) {
+    const h = res.headers.get("retry-after");
+    const ra = h === null || h.trim() === "" ? NaN : Number(h);
+    const until = now + (Number.isFinite(ra) && ra >= 0 ? Math.min(ra * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS);
+    cooldownUntil.set(account.id, until);
+    return { ...coolingDown(account, plan), cooldownUntil: until };
+  }
+  if (res.status === 401)
+    return { ok: false, needsLogin: true, plan, error: `${account.label}: session expired. Sign in again in the Claude Pool panel.` };
+  if (res.status === 403)
+    return { ok: false, plan, error: `${account.label}: this login cannot read usage (a setup-token login cannot).` };
+  if (!res.ok)
+    return { ok: false, plan, error: `${account.label}: API error ${res.status}` };
+  try {
+    return { ...parseUsagePayload(await res.json()), plan };
+  } catch {
+    return { ok: false, plan, error: `${account.label}: unexpected response from Anthropic` };
+  }
+}
+async function refreshUsage(accounts, dataDir = poolDataDir(), deps = {}) {
+  const before = readState2(dataDir);
+  const startedAt = (deps.now ?? Date.now)();
+  const reads = await Promise.all(accounts.map((a) => {
+    const shared = before.accounts[a.id]?.usageCooldownUntil ?? 0;
+    return shared > startedAt ? Promise.resolve(coolingDown(a, a.plan ?? null)) : readAccountUsage(a, deps);
+  }));
+  const now = (deps.now ?? Date.now)();
+  const out = {};
+  const present = new Set(readAccounts(dataDir).accounts.map((a) => a.id));
+  updateState((s) => {
+    accounts.forEach((a, i) => {
+      const r = reads[i];
+      out[a.id] = r;
+      if (!present.has(a.id))
+        return;
+      if (r.ok) {
+        setNeedsLogin(s, a.id, false);
+        for (const [name, w] of Object.entries(r.windows))
+          recordWindow(s, a.id, name, { ...w, updatedAt: now });
+      } else if (r.needsLogin) {
+        setNeedsLogin(s, a.id, true);
+      } else if (r.cooldownUntil !== undefined) {
+        accountState(s, a.id).usageCooldownUntil = r.cooldownUntil;
+      }
+    });
+  }, dataDir, now);
+  return out;
+}
+var STALE_USAGE_MS = 2 * 60000;
+var NEAR_FULL_PERCENT = 85;
+function accountsToFreshen(accounts, state, now, opts) {
+  return accounts.filter((a) => {
+    const st = state.accounts[a.id];
+    if (!a.enabled || st?.needsLogin)
+      return false;
+    if ((st?.limitedUntil ?? 0) > now || (st?.usageCooldownUntil ?? 0) > now)
+      return false;
+    const wins = Object.values(st?.windows ?? {}).filter((w) => !!w);
+    if (wins.length === 0)
+      return true;
+    const stale = wins.some((w) => now - w.updatedAt > STALE_USAGE_MS);
+    if (!stale)
+      return false;
+    if (opts.newConversation)
+      return true;
+    return wins.some((w) => (w.resetsAt === null || w.resetsAt > now) && w.usedPercent >= NEAR_FULL_PERCENT);
+  });
+}
+
+// plugin/src/usage-refresh.ts
+var FRESHEN_BUDGET_MS = 1500;
+var READ_TIMEOUT_MS = 5000;
+function makeUsageFreshener(deps = {}, budgetMs = FRESHEN_BUDGET_MS) {
+  const lastAttempt = new Map;
+  const inFlight = new Map;
+  return async (accounts, dataDir, newConversation) => {
+    const now = (deps.now ?? Date.now)();
+    const due = accountsToFreshen(accounts, readState2(dataDir), now, { newConversation }).filter((a) => inFlight.has(a.id) || now - (lastAttempt.get(a.id) ?? -Infinity) > STALE_USAGE_MS);
+    if (due.length === 0)
+      return;
+    const waits = due.map((a) => {
+      let p = inFlight.get(a.id);
+      if (!p) {
+        lastAttempt.set(a.id, now);
+        p = refreshUsage([a], dataDir, { ...deps, timeoutMs: deps.timeoutMs ?? READ_TIMEOUT_MS }).catch((err) => log.warn("[claude-pool] usage refresh before routing failed", err instanceof Error ? err.message : err)).finally(() => inFlight.delete(a.id));
+        inFlight.set(a.id, p);
+      }
+      return p;
+    });
+    let timer;
+    const budget = new Promise((resolve) => {
+      timer = setTimeout(resolve, budgetMs);
+      timer.unref?.();
+    });
+    try {
+      await Promise.race([Promise.all(waits), budget]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+function installUsageFreshener() {
+  setUsageFreshener(process.env.CLAUDE_POOL_USAGE_REFRESH === "off" ? null : makeUsageFreshener());
 }
 
 // plugin/src/usage.ts
@@ -58215,6 +58456,7 @@ async function startProxy() {
     return proxyPort;
   installPoolStateBridge();
   installTranscriptMigration();
+  installUsageFreshener();
   if (REQUESTED_PROXY_PORT > 0) {
     const pinnedUrl = `http://127.0.0.1:${REQUESTED_PROXY_PORT}/v1`;
     if (await isProxyHealthyAt(pinnedUrl)) {
@@ -58579,7 +58821,7 @@ async function handleChatCompletions(req, body) {
   if (existing && existing.pendingTools.size > 0) {
     let resolved = 0;
     const freshSteering = collectSteeringMessages(messages).map((m) => ({
-      key: createHash3("sha1").update(m.key).digest("hex"),
+      key: createHash4("sha1").update(m.key).digest("hex"),
       blocks: m.blocks,
       prompt: m.prompt
     })).filter((m) => !existing.forwardedSteering.has(m.key));
@@ -59469,7 +59711,7 @@ async function buildOpenCodeMcpServer(tools, pendingTools, onPark) {
 }
 async function collectTurnResponse(events, model, bridge, options) {
   const suppressReasoning = options?.suppressReasoning === true;
-  const completionId = `chatcmpl_${createHash3("sha1").update(bridge.id).digest("hex").slice(0, 24)}`;
+  const completionId = `chatcmpl_${createHash4("sha1").update(bridge.id).digest("hex").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
   let content = "";
   let reasoning = "";
@@ -59722,7 +59964,7 @@ function failureResponse(rawErrorText, conversationKey, metaKind, configDir) {
 }
 function streamOpenAIResponse(events, model, bridge, options) {
   const suppressReasoning = options?.suppressReasoning === true;
-  const completionId = `chatcmpl_${createHash3("sha1").update(bridge.id).digest("hex").slice(0, 24)}`;
+  const completionId = `chatcmpl_${createHash4("sha1").update(bridge.id).digest("hex").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1000);
   const encoder = new TextEncoder;
   let streamClosed = false;

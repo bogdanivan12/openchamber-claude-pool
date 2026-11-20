@@ -76,7 +76,6 @@ export const account = (id: string, label: string, extra: Partial<AccountView> =
 /** Implements the service API contract in memory. Tests poke its fields to set up scenarios. */
 export class FakeService {
   accounts: AccountView[] = [];
-  threshold = 90;
   recoveredBackup = false;
   cliFound = true;
   candidates: string[] = [];
@@ -106,7 +105,7 @@ export class FakeService {
     const { method, path, body } = q;
     const err = (error: string, status = 400) => ({ status, json: { error } });
     const idMatch = path.match(/^\/api\/accounts\/([^/]+)$/);
-    if (method === "GET" && path === "/api/accounts") return { json: { accounts: this.accounts, threshold: this.threshold, recoveredBackup: this.recoveredBackup, cliFound: this.cliFound } };
+    if (method === "GET" && path === "/api/accounts") return { json: { accounts: this.accounts, recoveredBackup: this.recoveredBackup, cliFound: this.cliFound } };
     if (method === "GET" && path === "/api/import-candidates") return { json: { candidates: this.candidates } };
     if (method === "POST" && path === "/api/import") {
       const skippedDirs = new Set(this.skipped.map((s) => s.configDir));
@@ -130,12 +129,6 @@ export class FakeService {
       if (!this.accounts.some((a) => a.id === id)) return err("No such account", 404);
       this.accounts = this.accounts.filter((a) => a.id !== id);
       return { json: { ok: true, deletedLogin: q.query?.deleteLogin === "1" } };
-    }
-    if (method === "PUT" && path === "/api/settings") {
-      const t = body.threshold;
-      if (!Number.isInteger(t) || t < 50 || t > 100) return err("threshold must be an integer from 50 to 100");
-      this.threshold = t;
-      return { json: { ok: true } };
     }
     if (method === "POST" && path === "/api/accounts/ack-backup") { this.recoveredBackup = false; return { json: { ok: true } }; }
     if (method === "GET" && path === "/api/login") {

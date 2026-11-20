@@ -2018,7 +2018,6 @@ var api = (host) => ({
   patch: (accountId, p) => call(host, "PATCH", `/api/accounts/${id(accountId)}`, p),
   reorder: (ids) => call(host, "POST", "/api/accounts/reorder", { ids }),
   remove: (accountId, deleteLogin) => call(host, "DELETE", `/api/accounts/${id(accountId)}`, undefined, deleteLogin ? { deleteLogin: "1" } : undefined),
-  setThreshold: (threshold) => call(host, "PUT", "/api/settings", { threshold }),
   ackBackup: () => call(host, "POST", "/api/accounts/ack-backup"),
   loginStart: (p) => call(host, "POST", "/api/login/start", p),
   loginCode: (code) => call(host, "POST", "/api/login/code", { code }),

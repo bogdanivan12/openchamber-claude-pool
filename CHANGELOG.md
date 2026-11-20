@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- The switch threshold is gone: the pool uses every account up to its real limit (100% of the 5-hour or weekly window). The "Switching" section and `PUT /api/settings` are removed. `accounts.json` keeps a `threshold` field fixed at 100 so 0.3.x and older can still read it.
+- Fresh usage before routing: a `Claude Pool` request re-reads usage older than 2 minutes before it picks an account (every account on a new conversation, accounts at 85% or more on a running one). It waits at most 1.5 s; a slower read is saved for the next request. A 429 from the usage endpoint now pauses reads in both the service and the plugin (kept in `state.json`). Restart OpenChamber to load the updated plugin.
+- How it works FAQ updated to match.
+- Text that wraps onto several lines (the FAQ intro and answers, banners, empty states, the widget's error lines) is justified, with automatic hyphenation to keep the gaps small.
+
 ## 0.3.0
 
 - Panel redesign: a header with a one-line pool summary (how many accounts are available and where a new chat goes); all accounts on one surface split by hairlines instead of separate cards; per account a status dot, the badge next to the name, the "In pool" switch and a "⋯" menu (Rename, Move up, Move down, Remove); 5-hour and weekly usage one under the other (like the Work Status widget), each with its reset time beside the label, neutral until 70%, then warning and error; "Sign in again" takes the badge's place on a signed-out account; a "Switching" section for the threshold; skeleton rows while loading.

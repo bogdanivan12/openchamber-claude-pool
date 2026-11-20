@@ -30,14 +30,6 @@ export function resetText(resetsAt: number | null, now: number): string {
   return resetsAt === null || resetsAt <= now ? "" : `resets in ${duration(resetsAt - now)}`;
 }
 
-/** Mirrors the service's rule (integer 50..100) so the panel can reject early. */
-export function validateThreshold(text: string): { ok: true; value: number } | { ok: false; error: string } {
-  const t = text.trim();
-  const n = /^\d+$/.test(t) ? Number(t) : NaN;
-  if (!Number.isInteger(n) || n < 50 || n > 100) return { ok: false, error: "Enter a whole number from 50 to 100." };
-  return { ok: true, value: n };
-}
-
 export type AccountKind = "use" | "ready" | "out";
 /** In use now (green), available (neutral), unavailable because of a limit or sign-in (red). */
 export function accountKind(v: AccountView, now: number): { kind: AccountKind; label: string } {

@@ -77,6 +77,7 @@ import { log } from "./log.js";
 import { serve, type ProxyServer } from "./node-serve.js";
 import { installPoolStateBridge } from "./pool-state-bridge.js";
 import { installTranscriptMigration } from "./migrate.js";
+import { installUsageFreshener } from "./usage-refresh.js";
 import { checkSubscriptionAuth } from "./detect.js";
 import { handlePoolChat } from "./pool-proxy.js";
 import {
@@ -329,6 +330,7 @@ export async function startProxy(): Promise<number> {
   if (server && proxyPort) return proxyPort;
   installPoolStateBridge();
   installTranscriptMigration();
+  installUsageFreshener();
 
   // Only reuse a sibling listener when the operator pinned a port.
   if (REQUESTED_PROXY_PORT > 0) {

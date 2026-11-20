@@ -19,7 +19,7 @@ Prep: OpenChamber running; Settings → Extensions → Add, the absolute path of
 - [ ] **A11** Sign in with an account that is already in the pool (new name): the duplicate warning appears; "Remove the duplicate" removes the new entry and the original is untouched (still listed, still works). Pass ☐ Fail ☐
 - [ ] **A12** Make an account need login (or use "Sign in again" if shown), and sign in again with a different Claude login: the "Signed in as … (was …)" warning appears. A wrong code here leaves the account untouched. Pass ☐ Fail ☐
 - [ ] **A13** Rename an account to a name another account uses: an error shows in the field and the name is not changed. Pass ☐ Fail ☐
-- [ ] **A14** Threshold: enter 49, 101 and `abc`: each shows an error. Enter 50 and 100: each saves. Set it back to 90. Pass ☐ Fail ☐
+- [ ] **A14** The panel has no "Switching" section and no threshold field. Pass ☐ Fail ☐
 - [ ] **A15** Disable an account ("In pool" off): its provider leaves the model picker within seconds; turn it on again and it returns. Pass ☐ Fail ☐
 - [ ] **A16** Reorder with ↑ and ↓: the order changes and stays after Refresh. Pass ☐ Fail ☐
 - [ ] **A17** Remove an imported account (its folder is not under `~/.claude-pool/accounts`): no "delete" checkbox is offered; the account leaves the list and its login folder is untouched. Pass ☐ Fail ☐
@@ -38,10 +38,11 @@ Prep: OpenChamber running; Settings → Extensions → Add, the absolute path of
 ## C. Pool and failover
 
 - [ ] **C1** Send with `Claude Pool`: the turn runs on one account and the next turns of the same conversation stay on it. Pass ☐ Fail ☐
-- [ ] **C2** Set the threshold to 50, or to a value below the active account's current 5h usage. Send the next turn of the same conversation: it runs on the other account and the answer still uses the earlier context. Pass ☐ Fail ☐
+- [ ] **C2** Switch the conversation's account off ("In pool" off). Send the next turn of the same conversation: it runs on the other account and the answer still uses the earlier context. Pass ☐ Fail ☐
 - [ ] **C3** Transcript copy: after the move, the Claude session file for that conversation exists under both config dirs, for example `find ~/.claude ~/.claude-b ~/.claude-pool/accounts -name '<session id>.jsonl'` (look in `projects/...`). Pass ☐ Fail ☐
-- [ ] **C4** Set the threshold back to 90. Pass ☐ Fail ☐
-- [ ] **C5** (Only if you can) With every account at or over the threshold, a `Claude Pool` turn is refused with a 429 that names the earliest reset, not a hang. Pass ☐ Fail ☐ Skipped ☐
+- [ ] **C4** Switch that account back on. Pass ☐ Fail ☐
+- [ ] **C5** (Only if you can) With every account at its limit, a `Claude Pool` turn is refused with a 429 that names the earliest reset, not a hang. Pass ☐ Fail ☐ Skipped ☐
+- [ ] **C6** Leave the panel closed for over 2 minutes, then start a new `Claude Pool` chat: it answers without a noticeable extra wait, and opening the panel right after shows usage updated at that moment. Pass ☐ Fail ☐
 
 ## D. Service and processes
 

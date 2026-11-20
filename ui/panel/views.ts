@@ -1,5 +1,5 @@
 import { mountBadge, mountBanner, mountButton, mountCheckbox, mountEmpty, mountMenu, mountProgress, mountSwitch, mountTextField } from "@openchamber/sdk/ui";
-import { accountKind, resetText, statusBadge, validateThreshold, windowPercent, type AccountView } from "../shared/format.ts";
+import { accountKind, resetText, statusBadge, windowPercent, type AccountView } from "../shared/format.ts";
 import type { Ctx } from "./ctx.ts";
 
 export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = "") => {
@@ -75,7 +75,6 @@ export function renderList(ctx: Ctx, page: HTMLElement): void {
     data.accounts.forEach((a, i) => list.append(accountCard(ctx, a, i, data.accounts, now)));
     page.append(list);
   }
-  page.append(thresholdBox(ctx, data.threshold));
 }
 
 /** Placeholder rows in the shape of the account list, shown until the first answer. */
@@ -245,30 +244,5 @@ function removeRow(ctx: Ctx, a: AccountView): HTMLElement {
   } });
   mountButton(row, { label: "Cancel", variant: "ghost", size: "sm", onClick: () => { ctx.flows.removing = null; ctx.render(); } });
   box.append(row);
-  return box;
-}
-
-function thresholdBox(ctx: Ctx, saved: number): HTMLElement {
-  const box = el("section", "settings");
-  box.append(el("h2", "section-title", "Switching"));
-  const t = (ctx.flows.threshold ??= { text: String(saved) });
-  const row = el("div", "threshold-row");
-  const fieldWrap = el("div", "threshold-field");
-  const field = mountTextField(fieldWrap, {
-    label: "Switch accounts at (%)",
-    value: t.text,
-    error: t.error,
-    onChange: (v) => { t.text = v; t.error = undefined; field.update({ value: v, error: undefined }); },
-  });
-  row.append(fieldWrap);
-  const save = mountButton(row, { label: "Save", variant: "outline", onClick: () => {
-    const v = validateThreshold(t.text);
-    if (!v.ok) { t.error = v.error; field.update({ error: v.error }); return; }
-    void ctx.run(async () => {
-      try { await ctx.client.setThreshold(v.value); ctx.flows.threshold = null; }
-      catch (e) { t.error = (e as Error).message; }
-    }, save, { keepNotices: true });
-  } });
-  box.append(row, el("p", "muted small helper", "From 50 to 100. An account stops taking chats once its 5-hour or weekly usage passes this share; 100 uses it up to the real limit."));
   return box;
 }

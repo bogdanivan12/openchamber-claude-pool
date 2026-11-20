@@ -81,6 +81,20 @@ describe("refreshAllUsage", () => {
     expect(Object.keys(out).sort()).toEqual(["aaaaaa", "bbbbbb"]);
   });
 
+  it("a 429 cooldown is kept in state.json, so another process skips the account too", async () => {
+    let calls = 0;
+    const limited = (async () => { calls++; return new Response("", { status: 429, headers: { "retry-after": "120" } }); }) as any;
+    await refreshAllUsage(dir, { readCredential, fetch: limited, now: () => 1000 });
+    expect(readState(dir).accounts.aaaaaa.usageCooldownUntil).toBe(1000 + 120_000);
+    resetUsageCooldownsForTests(); // a fresh process has no in-memory cooldown
+    calls = 0;
+    const out = await refreshAllUsage(dir, { readCredential, fetch: limited, now: () => 2000 });
+    expect(calls).toBe(0);
+    expect(out.aaaaaa).toMatchObject({ ok: false, error: expect.stringContaining("rate-limited") });
+    await refreshAllUsage(dir, { readCredential, fetch: fetchBy({ a: "ok", b: "ok" }), now: () => 1000 + 120_001 });
+    expect(readState(dir).accounts.aaaaaa.windows.five_hour?.usedPercent).toBe(40);
+  });
+
   it("does not write state for an account removed while the reads were in flight", async () => {
     const slow = (async () => {
       updateAccounts((f) => { f.accounts = f.accounts.filter((a) => a.id !== "bbbbbb"); }, dir);

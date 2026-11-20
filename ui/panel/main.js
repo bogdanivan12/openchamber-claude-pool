@@ -2643,7 +2643,6 @@ var api = (host) => ({
   patch: (accountId, p) => call(host, "PATCH", `/api/accounts/${id(accountId)}`, p),
   reorder: (ids) => call(host, "POST", "/api/accounts/reorder", { ids }),
   remove: (accountId, deleteLogin) => call(host, "DELETE", `/api/accounts/${id(accountId)}`, undefined, deleteLogin ? { deleteLogin: "1" } : undefined),
-  setThreshold: (threshold) => call(host, "PUT", "/api/settings", { threshold }),
   ackBackup: () => call(host, "POST", "/api/accounts/ack-backup"),
   loginStart: (p) => call(host, "POST", "/api/login/start", p),
   loginCode: (code) => call(host, "POST", "/api/login/code", { code }),
@@ -2682,13 +2681,6 @@ function windowPercent(st, name, now) {
 }
 function resetText(resetsAt, now) {
   return resetsAt === null || resetsAt <= now ? "" : `resets in ${duration(resetsAt - now)}`;
-}
-function validateThreshold(text) {
-  const t = text.trim();
-  const n = /^\d+$/.test(t) ? Number(t) : NaN;
-  if (!Number.isInteger(n) || n < 50 || n > 100)
-    return { ok: false, error: "Enter a whole number from 50 to 100." };
-  return { ok: true, value: n };
 }
 function accountKind(v, now) {
   const unavailable = v.state?.needsLogin || v.state?.limitedUntil != null && v.state.limitedUntil > now || v.available === false;
@@ -2780,7 +2772,6 @@ function renderList(ctx, page) {
     data.accounts.forEach((a, i) => list.append(accountCard(ctx, a, i, data.accounts, now)));
     page.append(list);
   }
-  page.append(thresholdBox(ctx, data.threshold));
 }
 function renderSkeleton(page) {
   const sr = el2("span", "sr-only", "Loading…");
@@ -3014,42 +3005,6 @@ function removeRow(ctx, a) {
   box.append(row);
   return box;
 }
-function thresholdBox(ctx, saved) {
-  const box = el2("section", "settings");
-  box.append(el2("h2", "section-title", "Switching"));
-  const t = ctx.flows.threshold ??= { text: String(saved) };
-  const row = el2("div", "threshold-row");
-  const fieldWrap = el2("div", "threshold-field");
-  const field = mountTextField(fieldWrap, {
-    label: "Switch accounts at (%)",
-    value: t.text,
-    error: t.error,
-    onChange: (v) => {
-      t.text = v;
-      t.error = undefined;
-      field.update({ value: v, error: undefined });
-    }
-  });
-  row.append(fieldWrap);
-  const save = mountButton(row, { label: "Save", variant: "outline", onClick: () => {
-    const v = validateThreshold(t.text);
-    if (!v.ok) {
-      t.error = v.error;
-      field.update({ error: v.error });
-      return;
-    }
-    ctx.run(async () => {
-      try {
-        await ctx.client.setThreshold(v.value);
-        ctx.flows.threshold = null;
-      } catch (e) {
-        t.error = e.message;
-      }
-    }, save, { keepNotices: true });
-  } });
-  box.append(row, el2("p", "muted small helper", "From 50 to 100. An account stops taking chats once its 5-hour or weekly usage passes this share; 100 uses it up to the real limit."));
-  return box;
-}
 
 // ui/panel/help.ts
 var INTRO = "Claude Pool lets OpenChamber use several Claude subscriptions. Pick the Claude Pool provider and it chooses an account for you; pick “Claude · name” and it always uses that one account.";
@@ -3060,15 +3015,15 @@ var FAQ = [
       {
         q: "Which account does a new chat start on?",
         a: [
-          "An account counts as available when it is switched on (“In pool”), signed in, not at a limit, and below the switch threshold in both its 5-hour and 7-day windows.",
-          "Among the available accounts a new chat gets the one with the most room left before the threshold, counted on its fuller window (5-hour or weekly). A tie goes to the account higher in the list (reorder with Move up / Move down in the account’s ⋯ menu).",
+          "An account counts as available when it is switched on (“In pool”), signed in, not at a limit, and below 100% in both its 5-hour and 7-day windows.",
+          "Among the available accounts a new chat gets the one with the most room left, counted on its fuller window (5-hour or weekly). A tie goes to the account higher in the list (reorder with Move up / Move down in the account’s ⋯ menu).",
           "The account marked “Next for new chats” is the one a new chat would get right now."
         ]
       },
       {
         q: "When does a running chat move to another account?",
         a: [
-          "Never without a reason. A chat stays on its account, which keeps Claude's prompt cache warm and is cheaper, until that account passes the threshold or hits a limit.",
+          "Never without a reason. A chat stays on its account, which keeps Claude's prompt cache warm and is cheaper, until that account is full or hits a limit.",
           "The check happens when you send a message, not in the middle of an answer that is already streaming."
         ]
       },
@@ -3103,16 +3058,9 @@ var FAQ = [
         ]
       },
       {
-        q: "An account is under its real limit but the pool says everything is full. Why?",
+        q: "Can a long answer run into the limit halfway?",
         a: [
-          "The pool treats an account as full once it passes the switch threshold (90% by default), not only at the hard limit, so a chat never runs an account completely dry.",
-          "To use accounts all the way to the limit, raise “Switch accounts at” to 100. Or pick “Claude · name” in the model picker: that provider ignores the pool and always uses its own account."
-        ]
-      },
-      {
-        q: "What does the switch threshold do?",
-        a: [
-          "It is the share (50 to 100%) of the 5-hour or weekly window at which an account stops being chosen. Lower values spread the load across accounts sooner; higher values drain one account before moving on. 90 is a sensible default."
+          "Yes, rarely. The pool uses each account up to its real limit, and the numbers it checks are from before the message: what the answer itself uses is not known in advance. If the limit hits halfway through an answer, OpenChamber shows a retryable error and its retry lands on the next account."
         ]
       },
       {
@@ -3136,7 +3084,7 @@ var FAQ = [
       {
         q: "Where do the usage numbers come from, and how fresh are they?",
         a: [
-          "From Anthropic's usage endpoint, read with each account's own login, plus the rate-limit information Claude sends during chats. They refresh when you open this panel or press Refresh (at most every 45 seconds). Nothing polls in the background and no daemon is left running."
+          "From Anthropic's usage endpoint, read with each account's own login, plus the rate-limit information Claude sends during chats. They refresh when you open this panel or press Refresh (at most every 45 seconds), and before a Claude Pool message picks an account when the numbers are more than 2 minutes old and the account is close to full (or the chat is new). That check waits at most 1.5 seconds; a slower answer is used for the next message. Nothing polls in the background and no daemon is left running."
         ]
       },
       {
@@ -3333,7 +3281,7 @@ function renderLoginScreen(ctx, page) {
   box.append(el2("strong", "", s.isNew ? `Sign in "${s.view.label}"` : `Sign in again as "${s.view.label}"`));
   box.append(el2("div", "", "Sign in on the Claude page that opened, then paste the code it shows."));
   if (s.isNew)
-    box.append(el2("div", "muted", "A wrong code cancels this sign-in; you would need to start again."));
+    box.append(el2("div", "muted hint", "A wrong code cancels this sign-in; you would need to start again."));
   const link = el2("div", "row");
   mountButton(link, { label: "Open the sign-in page", variant: "ghost", size: "sm", onClick: () => void openSignInPage(ctx, s.view.url).then(() => ctx.render()) });
   box.append(link);
@@ -3381,7 +3329,7 @@ function createPanel(host, root, opts = {}) {
     data: null,
     loading: true,
     screen: { kind: "list" },
-    flows: { adding: null, renaming: null, removing: null, importing: null, threshold: null },
+    flows: { adding: null, renaming: null, removing: null, importing: null },
     notices: [],
     sleep: opts.sleep ?? realSleep,
     notify(n) {

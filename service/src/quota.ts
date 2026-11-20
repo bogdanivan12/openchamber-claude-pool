@@ -48,11 +48,10 @@ function planSummary(reads: Record<string, UsageRead>, accounts: Account[]): str
 export function buildQuotaAnswer(input: {
   accounts: Account[];
   state: PoolState;
-  threshold: number;
   now: number;
   reads: Record<string, UsageRead>;
 }): QuotaProviderUsageData {
-  const { accounts, state, threshold, now, reads } = input;
+  const { accounts, state, now, reads } = input;
   if (accounts.length === 0) {
     return { ok: false, configured: true, error: "No Claude accounts yet. Add one in the Claude Pool panel.", usage: null };
   }
@@ -77,7 +76,7 @@ export function buildQuotaAnswer(input: {
     const firstError = Object.values(reads).find((r): r is UsageRead & { ok: false } => !r.ok)?.error ?? "No usage data yet.";
     return { ok: false, configured: true, error: firstError.slice(0, 2000), planLabel: planSummary(reads, accounts), usage: null };
   }
-  const routed = route({ accounts, state, threshold, now });
+  const routed = route({ accounts, state, now });
   const top = routed.kind === "account"
     ? routed.account
     : accounts.find((a) => Object.keys(windowsOf(state.accounts[a.id], now)).length > 0) ?? accounts[0];

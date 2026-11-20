@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Claude Pool</title>
@@ -61,10 +61,6 @@
       .usage .oc-sdk-progress-track { height: 4px; }
       .usage .oc-sdk-progress-fill:not([data-tone]) { background: color-mix(in srgb, var(--cp-fg) 55%, transparent); }
 
-      .settings { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
-      .threshold-row { display: flex; align-items: flex-end; gap: 8px; }
-      .threshold-field { width: 9.5em; }
-      .helper { max-width: 52ch; line-height: 1.45; }
 
       /* Skeleton in the shape of the list */
       .sk { display: block; border-radius: 6px; background: color-mix(in srgb, var(--cp-fg) 8%, transparent); }
@@ -74,6 +70,9 @@
       .sk-bar { height: 18px; }
       @media (prefers-reduced-motion: no-preference) { .sk { animation: cp-pulse 1.4s ease-in-out infinite; } }
       @keyframes cp-pulse { 50% { opacity: .5; } }
+
+      /* Text that can wrap onto several lines is justified; hyphenation keeps the gaps small. */
+      .intro, .faq-body p, .oc-sdk-banner-body, .oc-sdk-empty-body, .hint { text-align: justify; text-justify: inter-word; hyphens: auto; -webkit-hyphens: auto; overflow-wrap: break-word; }
 
       /* Help */
       .intro { line-height: 1.55; max-width: 60ch; }

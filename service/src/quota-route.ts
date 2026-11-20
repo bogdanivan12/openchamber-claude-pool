@@ -12,7 +12,7 @@ export function quotaRoute(deps: UsageDeps & { dataDir?: string } = {}): Route {
     if (!readQuotaProviderRequest(r.body)) return { status: 400, body: { error: "not a usage call this service understands" } };
     const reads = await refreshAllUsage(dataDir, usageDeps);
     const file = readAccounts(dataDir);
-    const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(dataDir), threshold: file.threshold, now: (usageDeps.now ?? Date.now)(), reads });
+    const data = buildQuotaAnswer({ accounts: enabledAccounts(file), state: readState(dataDir), now: (usageDeps.now ?? Date.now)(), reads });
     return { status: 200, body: { ok: true, data } };
   };
 }

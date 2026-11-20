@@ -14,6 +14,13 @@ export function setMigrationHook(fn: MigrationHook | null): void {
   migrationHook = fn;
 }
 
+/** Re-reads usage before a pool request routes; `newConversation` = the request has no bound account. */
+export type UsageFreshener = (accounts: Account[], dataDir: string, newConversation: boolean) => Promise<void>;
+let usageFreshener: UsageFreshener | null = null;
+export function setUsageFreshener(fn: UsageFreshener | null): void {
+  usageFreshener = fn;
+}
+
 /** The default dir runs without CLAUDE_CONFIG_DIR, so it keeps its own Keychain item. */
 export function withAccountDir(req: Request, configDir: string): Request {
   const headers = new Headers(req.headers);
@@ -85,8 +92,8 @@ export function trackActivity(res: Response, dataDir: string, key: string | unde
 }
 
 /** The earliest moment any account is available, ignoring which ones were tried; null when none has a known time. */
-export function earliestRetryAt(enabled: Account[], state: PoolState, threshold: number, now: number): number | null {
-  const all = route({ accounts: enabled, state, threshold, now });
+export function earliestRetryAt(enabled: Account[], state: PoolState, now: number): number | null {
+  const all = route({ accounts: enabled, state, now });
   return all.kind === "none" ? all.retryAt : null;
 }
 
@@ -169,13 +176,18 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
     }
   }
 
+  // Fresh numbers before the pick, so an account near its limit is judged on its real usage.
+  if (usageFreshener) {
+    try { await usageFreshener(enabled, dataDir, !previous); } catch { /* route on the last known numbers */ }
+  }
+
   for (let attempt = 0; attempt < enabled.length; attempt++) {
     const now = Date.now();
     const state = readState(dataDir);
-    const choice = route({ accounts: enabled, state, threshold: file.threshold, now, current: previous?.id, exclude: tried });
+    const choice = route({ accounts: enabled, state, now, current: previous?.id, exclude: tried });
     if (choice.kind === "none") {
       if (tried.size === 0) return poolLimitResponse(choice.retryAt);
-      return exhausted(enabled, state, file.threshold);
+      return exhausted(enabled, state);
     }
     const account = choice.account;
 
@@ -204,13 +216,13 @@ export async function handlePoolChat(req: Request, body: any, handle: ChatHandle
     tried.add(account.id);
     previous = account;
   }
-  return exhausted(enabled, readState(dataDir), file.threshold);
+  return exhausted(enabled, readState(dataDir));
 }
 
 /** Every account was tried or is unavailable: answer with the earliest moment any frees up. */
-function exhausted(enabled: Account[], state: PoolState, threshold: number): Response {
-  const at = earliestRetryAt(enabled, state, threshold, Date.now());
+function exhausted(enabled: Account[], state: PoolState): Response {
+  const at = earliestRetryAt(enabled, state, Date.now());
   // null with accounts still routable means every attempt failed with an odd 429, not that they are signed out.
-  if (at === null && route({ accounts: enabled, state, threshold, now: Date.now() }).kind === "account") return generalLimitResponse();
+  if (at === null && route({ accounts: enabled, state, now: Date.now() }).kind === "account") return generalLimitResponse();
   return poolLimitResponse(at);
 }

@@ -108,7 +108,7 @@ describe("account api", () => {
     expect(new Set(labels.map((l) => l.toLowerCase())).size).toBe(2);
   });
 
-  it("renames, disables, re-enables, reorders and sets the threshold", async () => {
+  it("renames, disables, re-enables and reorders", async () => {
     const { home, dataDir, call } = setup();
     await call("POST /api/import", { configDirs: [join(home, ".claude"), join(home, ".claude-b")] });
     const [a, b] = readAccounts(dataDir).accounts;
@@ -122,8 +122,6 @@ describe("account api", () => {
     expect(after.accounts.find((x) => x.id === a.id)).toMatchObject({ order: 1, configDir: a.configDir });
     const back = await call("PATCH /api/accounts/:id", { enabled: true }, `id=${b.id}`);
     expect(back.body).toMatchObject({ enabled: true, id: b.id, configDir: b.configDir });
-    expect((await call("PUT /api/settings", { threshold: 80 })).body.threshold).toBe(80);
-    expect((await call("PUT /api/settings", { threshold: 10 })).status).toBe(400);
   });
 
   it("rejects a label another account uses (case-insensitive, trimmed) but allows re-saving your own", async () => {
@@ -163,18 +161,6 @@ describe("account api", () => {
     expect(after.map((a) => a.id)).toEqual(["cccccc", "aaaaaa", "bbbbbb", "dddddd"]);
     expect(after.map((a) => a.order)).toEqual([0, 1, 2, 3]);
     expect((await call("POST /api/accounts/reorder", { ids: "nope" })).status).toBe(400);
-  });
-
-  it("accepts thresholds 50 and 100 and rejects 49, 101, 90.5 and \"90\"", async () => {
-    const { dataDir, call } = setup();
-    for (const ok of [50, 100]) {
-      expect((await call("PUT /api/settings", { threshold: ok })).body.threshold).toBe(ok);
-      expect(readAccounts(dataDir).threshold).toBe(ok);
-    }
-    for (const bad of [49, 101, 90.5, "90"]) {
-      expect((await call("PUT /api/settings", { threshold: bad })).status).toBe(400);
-    }
-    expect(readAccounts(dataDir).threshold).toBe(100);
   });
 
   it("removes an account; logs out and deletes the login only for pool-created dirs", async () => {
@@ -259,7 +245,7 @@ describe("account api", () => {
     expect(out.body.accounts[0]).toMatchObject({ canDeleteLogin: false, poolActive: false, nextChat: true, state: null });
     expect(out.body.accounts[1]).toMatchObject({ canDeleteLogin: false, poolActive: false });
     expect(out.body.accounts[1].state.windows.five_hour.usedPercent).toBe(12);
-    expect(out.body.threshold).toBe(90);
+    expect(out.body.threshold).toBeUndefined();
     expect(out.body.cliFound).toBe(true);
     expect(out.body.recoveredBackup).toBe(false);
   });
@@ -307,11 +293,15 @@ describe("account api", () => {
     for (const body of bodies) expect(body).not.toContain(SECRET);
   });
 
+  it("has no settings route: the switch threshold is gone", () => {
+    expect(accountRoutes()["PUT /api/settings"]).toBeUndefined();
+  });
+
   it("answers 400 for a body that is not a JSON object, in every route that reads one", async () => {
     const { dataDir, call } = setup();
     updateAccounts((f) => { f.accounts.push({ id: "aaaaaa", label: "a", configDir: "/x/a", order: 0, enabled: true }); }, dataDir);
     for (const body of [null, [], "text", 7]) {
-      for (const [key, q] of [["POST /api/import", ""], ["PATCH /api/accounts/:id", "id=aaaaaa"], ["POST /api/accounts/reorder", ""], ["PUT /api/settings", ""]] as const) {
+      for (const [key, q] of [["POST /api/import", ""], ["PATCH /api/accounts/:id", "id=aaaaaa"], ["POST /api/accounts/reorder", ""]] as const) {
         const out = await call(key, body, q);
         expect([key, out.status, out.body]).toEqual([key, 400, { error: "Expected a JSON object" }]);
       }
