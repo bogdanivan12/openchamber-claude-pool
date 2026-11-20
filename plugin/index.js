@@ -57388,6 +57388,115 @@ function findClaudeSessionFile(foreignSessionId, configDir) {
   return null;
 }
 
+// plugin/src/node-serve.ts
+import http from "node:http";
+import { Readable } from "node:stream";
+async function serve(options) {
+  const bun = globalThis.Bun;
+  if (bun && typeof bun.serve === "function") {
+    return bun.serve({
+      hostname: options.hostname,
+      port: options.port,
+      idleTimeout: options.idleTimeout,
+      fetch: options.fetch
+    });
+  }
+  return serveWithNode(options);
+}
+function serveWithNode(options) {
+  const server = http.createServer(async (nodeReq, nodeRes) => {
+    const controller = new AbortController;
+    nodeRes.on("close", () => {
+      if (!nodeRes.writableFinished)
+        controller.abort();
+    });
+    try {
+      const headers = new Headers;
+      for (const [name, value] of Object.entries(nodeReq.headers)) {
+        if (value === undefined)
+          continue;
+        if (Array.isArray(value))
+          for (const v of value)
+            headers.append(name, v);
+        else
+          headers.set(name, value);
+      }
+      const method = nodeReq.method ?? "GET";
+      const hasBody = method !== "GET" && method !== "HEAD";
+      const init = { method, headers, signal: controller.signal };
+      if (hasBody) {
+        init.body = Readable.toWeb(nodeReq);
+        init.duplex = "half";
+      }
+      const host = nodeReq.headers.host ?? `${options.hostname}:${options.port}`;
+      const response = await options.fetch(new Request(`http://${host}${nodeReq.url ?? "/"}`, init));
+      const out = {};
+      response.headers.forEach((value, name) => {
+        out[name] = value;
+      });
+      const cookies = response.headers.getSetCookie?.();
+      if (cookies && cookies.length > 0)
+        out["set-cookie"] = cookies;
+      nodeRes.writeHead(response.status, out);
+      if (!response.body) {
+        nodeRes.end();
+        return;
+      }
+      const reader = response.body.getReader();
+      nodeRes.on("close", () => {
+        reader.cancel().catch(() => {});
+      });
+      for (;; ) {
+        const { done, value } = await reader.read();
+        if (done)
+          break;
+        if (nodeRes.destroyed)
+          break;
+        if (!nodeRes.write(value)) {
+          await new Promise((resolve) => {
+            const finish = () => {
+              nodeRes.off("drain", finish);
+              nodeRes.off("close", finish);
+              resolve();
+            };
+            nodeRes.on("drain", finish);
+            nodeRes.on("close", finish);
+          });
+        }
+      }
+      nodeRes.end();
+    } catch (err) {
+      if (nodeRes.headersSent) {
+        nodeRes.destroy(err instanceof Error ? err : undefined);
+        return;
+      }
+      nodeRes.writeHead(500, { "content-type": "text/plain" });
+      nodeRes.end(err instanceof Error ? err.message : "Internal Server Error");
+    }
+  });
+  server.requestTimeout = 0;
+  server.timeout = options.idleTimeout * 1000;
+  server.keepAliveTimeout = 5000;
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.port, options.hostname, () => {
+      server.off("error", reject);
+      resolve({
+        get port() {
+          return server.address()?.port;
+        },
+        stop(closeActiveConnections = true) {
+          server.close();
+          if (closeActiveConnections)
+            server.closeAllConnections();
+          else
+            server.closeIdleConnections();
+        }
+      });
+    });
+  });
+}
+
 // shared/state.ts
 init_zod();
 var CONVERSATION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -58117,7 +58226,7 @@ async function startProxy() {
   const hostname = "127.0.0.1";
   const bindPort = REQUESTED_PROXY_PORT;
   try {
-    server = Bun.serve({
+    server = await serve({
       hostname,
       port: bindPort,
       idleTimeout: PROXY_IDLE_TIMEOUT_SECONDS,

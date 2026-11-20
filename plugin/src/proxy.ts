@@ -74,6 +74,7 @@ import {
   setForeignSessionId,
 } from "./session-store.js";
 import { log } from "./log.js";
+import { serve, type ProxyServer } from "./node-serve.js";
 import { installPoolStateBridge } from "./pool-state-bridge.js";
 import { installTranscriptMigration } from "./migrate.js";
 import { checkSubscriptionAuth } from "./detect.js";
@@ -252,7 +253,7 @@ type ChatCompletionRequest = {
   temperature?: number;
 };
 
-let server: ReturnType<typeof Bun.serve> | null = null;
+let server: ProxyServer | null = null;
 let proxyPort: number | null = null;
 
 /** Injectable for smoke tests — production path always uses startClaudeQuery. */
@@ -343,7 +344,7 @@ export async function startProxy(): Promise<number> {
   const bindPort = REQUESTED_PROXY_PORT; // 0 → ephemeral
 
   try {
-    server = Bun.serve({
+    server = await serve({
       hostname,
       port: bindPort,
       idleTimeout: PROXY_IDLE_TIMEOUT_SECONDS,

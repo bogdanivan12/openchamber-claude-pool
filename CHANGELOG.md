@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Fix: "Bun is not defined" when OpenChamber's built-in OpenCode (which runs on Node, not Bun) starts the plugin's proxy. The proxy now uses `Bun.serve` under Bun and a `node:http` server otherwise. Restart OpenChamber to load the updated plugin.
+
 ## 0.2.2
 
 - A response that is still streaming keeps its account green: the proxy renews the conversation's activity every 10 s while the body is open and once more when it ends (the 5-minute window then starts). Cancelling or finishing the stream stops the heartbeat. Restart OpenChamber to load the updated plugin.

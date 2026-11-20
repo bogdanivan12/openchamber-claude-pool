@@ -1,6 +1,6 @@
 {
   "name": "claude-pool-opencode-plugin",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "OpenCode plugin bundled by the Claude Pool OpenChamber extension. OpenCode loads index.js."
