@@ -2074,6 +2074,16 @@ var el2 = (tag, cls = "", text = "") => {
   return node;
 };
 var line = (text, cls = "muted") => el2("span", `line ${cls}`, text);
+function skeleton() {
+  const wrap = el2("div", "skeleton");
+  wrap.append(el2("span", "sr-only", "Loading…"));
+  for (let i = 0;i < 2; i++) {
+    const r = el2("div", "sk-row");
+    r.append(el2("span", "sk sk-name"), el2("span", "sk sk-bar"), el2("span", "sk sk-bar"));
+    wrap.append(r);
+  }
+  return wrap;
+}
 var MIN_HEIGHT = 24;
 var clock = (t, withDay) => {
   const d = new Date(t);
@@ -2089,9 +2099,16 @@ function windowLine(label, a, name, now) {
   left.append(el2("span", "", label));
   if (w.resetsAt !== null && w.resetsAt > now)
     left.append(el2("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
-  const tone = percent >= 80 ? "pct pct-error" : percent >= 50 ? "pct pct-warning" : "pct";
+  const level = percent >= 80 ? "error" : percent >= 50 ? "warning" : "";
+  const top = el2("div", "win-line");
+  top.append(left, el2("span", level ? `pct pct-${level}` : "pct", `${percent}%`));
+  const bar = el2("div", "bar");
+  bar.setAttribute("aria-hidden", "true");
+  const fill = el2("span", level ? `fill fill-${level}` : "fill");
+  fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  bar.append(fill);
   const l = el2("div", "win");
-  l.append(left, el2("span", tone, `${percent}%`));
+  l.append(top, bar);
   return l;
 }
 function row(a, now, out) {
@@ -2133,13 +2150,16 @@ function createStatus(host, root, opts = {}) {
   const now = opts.now ?? Date.now;
   let seq = 0;
   const body = el2("div", "list");
+  const foot = el2("div", "foot");
+  const updated = el2("span", "updated", "");
   const refresh = el2("button", "refresh", "↻");
   refresh.type = "button";
   refresh.title = "Refresh";
   refresh.setAttribute("aria-label", "Refresh");
   refresh.addEventListener("click", () => void load());
-  root.replaceChildren(body, refresh);
-  body.append(line("Loading…"));
+  foot.append(updated, refresh);
+  root.replaceChildren(body, foot);
+  body.append(skeleton());
   async function reportHeight() {
     try {
       const content = Math.ceil(root.getBoundingClientRect().height);
@@ -2170,6 +2190,7 @@ function createStatus(host, root, opts = {}) {
     if (mine !== seq)
       return;
     refresh.disabled = false;
+    updated.textContent = `Updated ${clock(now(), false)}`;
     body.replaceChildren(...children);
     await reportHeight();
   }

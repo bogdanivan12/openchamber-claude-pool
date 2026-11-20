@@ -32,6 +32,18 @@ export const findButton = (root: Element, label: string) =>
   Array.from(root.querySelectorAll("button")).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 export const buttonLabels = (root: Element) => Array.from(root.querySelectorAll("button")).map((b) => b.textContent?.trim() ?? "");
 
+/** Opens the n-th account's "⋯" menu and picks an item. */
+export async function menu(root: Element, item: string, n = 0): Promise<void> {
+  const triggers = Array.from(root.querySelectorAll("button[aria-haspopup=menu]")) as HTMLButtonElement[];
+  if (!triggers[n]) throw new Error(`No account menu #${n}`);
+  triggers[n].click();
+  await settle();
+  const opt = Array.from(root.querySelectorAll("[role=menuitem]")).find((b) => b.textContent?.trim() === item) as HTMLButtonElement | undefined;
+  if (!opt) throw new Error(`No menu item "${item}"`);
+  opt.click();
+  await settle();
+}
+
 export async function click(root: Element, label: string): Promise<void> {
   const b = findButton(root, label);
   if (!b) throw new Error(`No button "${label}". Buttons: ${buttonLabels(root).join(", ")}`);

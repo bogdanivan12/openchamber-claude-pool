@@ -1,8 +1,9 @@
-import { applyHostReady, mountButton, mountSpinner } from "@openchamber/sdk/ui";
+import { applyHostReady, mountButton } from "@openchamber/sdk/ui";
 import { api } from "../shared/api.ts";
 import type { Ctx, Notice, PanelHost } from "./ctx.ts";
+import { renderHelp } from "./help.ts";
 import { renderLoginScreen, resumeLogin, startLogin } from "./login-flow.ts";
-import { el, renderBanners, renderList, renderNotices } from "./views.ts";
+import { el, renderBanners, renderList, renderNotices, renderSkeleton } from "./views.ts";
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -49,10 +50,12 @@ export function createPanel(host: PanelHost, root: Element, opts: { sleep?: (ms:
       if (ctx.screen.kind === "list") {
         renderBanners(ctx, page);
         if (ctx.data) renderList(ctx, page);
-        else if (ctx.loading) mountSpinner(page, { label: "Loading…" });
+        else if (ctx.loading) renderSkeleton(page);
         else {
           const retry = mountButton(page, { label: "Try again", onClick: () => void ctx.run(async () => {}, retry) });
         }
+      } else if (ctx.screen.kind === "help") {
+        renderHelp(ctx, page);
       } else {
         renderNotices(ctx, page);
         renderLoginScreen(ctx, page);

@@ -1972,6 +1972,11 @@ ${UI_SIZE_CSS}
 ${GUEST_UI_LOOK_CSS}`;
 // node_modules/@openchamber/sdk/dist/ui/dom.js
 var STYLE_ID = "oc-sdk-ui-style";
+var clearNode = (node) => {
+  while (node.firstChild) {
+    node.removeChild(node.firstChild);
+  }
+};
 var ensureStyle = (css) => {
   const existing = document.getElementById(STYLE_ID);
   if (existing instanceof HTMLStyleElement) {
@@ -2010,6 +2015,18 @@ var setAttr = (node, name, value) => {
   } else if (node.getAttribute(name) !== value) {
     node.setAttribute(name, value);
   }
+};
+var onOutsideClick = (node, handler) => {
+  const listener = (event) => {
+    if (event.target instanceof Node && node.contains(event.target)) {
+      return;
+    }
+    handler();
+  };
+  document.addEventListener("pointerdown", listener, true);
+  return () => {
+    document.removeEventListener("pointerdown", listener, true);
+  };
 };
 
 // node_modules/@openchamber/sdk/dist/ui/button.js
@@ -2130,6 +2147,119 @@ var icon = (name, size, className) => {
   path.setAttribute("d", ICON_PATH[name]);
   node.append(path);
   return node;
+};
+// node_modules/@openchamber/sdk/dist/ui/navigation.js
+var navigationKey = (event, axis = "vertical") => {
+  const [next, previous] = axis === "vertical" ? ["ArrowDown", "ArrowUp"] : ["ArrowRight", "ArrowLeft"];
+  if (event.key === next || event.ctrlKey && event.key.toLowerCase() === "n")
+    return "next";
+  if (event.key === previous || event.ctrlKey && event.key.toLowerCase() === "p")
+    return "previous";
+  if (event.key === "Home")
+    return "first";
+  if (event.key === "End")
+    return "last";
+  return null;
+};
+var moveListSelection = (items, currentId, key) => {
+  const enabled = items.filter((item) => !item.disabled);
+  if (enabled.length === 0) {
+    return null;
+  }
+  const first = enabled[0];
+  const last = enabled[enabled.length - 1];
+  if (key === "first" || !first || !last) {
+    return first?.id ?? null;
+  }
+  if (key === "last") {
+    return last.id;
+  }
+  const index = enabled.findIndex((item) => item.id === currentId);
+  if (index === -1) {
+    return key === "next" ? first.id : last.id;
+  }
+  const target = enabled[Math.min(enabled.length - 1, Math.max(0, index + (key === "next" ? 1 : -1)))];
+  return target?.id ?? null;
+};
+
+// node_modules/@openchamber/sdk/dist/ui/option.js
+var optionId = (uid, id) => `${uid}-${id ?? ""}`;
+var createOption = (uid, role, spec, on) => {
+  const node = button("oc-sdk-option");
+  node.id = optionId(uid, spec.id);
+  node.setAttribute("role", role);
+  node.tabIndex = -1;
+  node.disabled = Boolean(spec.disabled);
+  if (role === "option") {
+    node.setAttribute("aria-selected", spec.selected ? "true" : "false");
+  }
+  node.dataset.destructive = spec.destructive ? "true" : "false";
+  const label = el("span", "oc-sdk-option-label");
+  label.textContent = spec.label;
+  node.append(label);
+  if (spec.hint) {
+    const hint = el("span", "oc-sdk-option-hint");
+    hint.textContent = spec.hint;
+    node.append(hint);
+  }
+  if (role === "option") {
+    node.dataset.mark = "check";
+    const check = el("span", "oc-sdk-option-check");
+    check.append(icon("check", 14));
+    node.append(check);
+  }
+  node.addEventListener("pointerenter", on.hover);
+  node.addEventListener("click", on.pick);
+  return node;
+};
+var highlightOption = (container, focusOwner, uid, id) => {
+  const target = optionId(uid, id);
+  for (const child of Array.from(container.children)) {
+    if (child instanceof HTMLElement && child.classList.contains("oc-sdk-option")) {
+      child.dataset.active = child.id === target ? "true" : "false";
+    }
+  }
+  setAttr(focusOwner, "aria-activedescendant", id ? target : null);
+  container.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+};
+
+// node_modules/@openchamber/sdk/dist/ui/popup.js
+var placePopup = (popup, trigger) => {
+  const rect = trigger.getBoundingClientRect();
+  popup.style.minWidth = `${Math.round(rect.width)}px`;
+  popup.style.left = `${Math.round(rect.left)}px`;
+  popup.style.top = `${Math.round(rect.bottom + 4)}px`;
+  const height = popup.offsetHeight;
+  const roomBelow = window.innerHeight - rect.bottom - 8;
+  if (height > roomBelow && rect.top - 8 > roomBelow) {
+    popup.style.top = `${Math.max(8, Math.round(rect.top - 4 - height))}px`;
+  }
+  const overflow = rect.left + popup.offsetWidth - window.innerWidth + 8;
+  if (overflow > 0) {
+    popup.style.left = `${Math.max(8, Math.round(rect.left - overflow))}px`;
+  }
+};
+var openPopup = (host, trigger, popup, close) => {
+  host.append(popup);
+  placePopup(popup, trigger);
+  const stopOutside = onOutsideClick(host, close);
+  const onResize = () => {
+    close();
+  };
+  const onScroll = (event) => {
+    if (event.target instanceof Node && popup.contains(event.target)) {
+      return;
+    }
+    close();
+  };
+  window.addEventListener("resize", onResize);
+  window.addEventListener("scroll", onScroll, true);
+  return () => {
+    stopOutside();
+    window.removeEventListener("resize", onResize);
+    window.removeEventListener("scroll", onScroll, true);
+    popup.remove();
+  };
 };
 // node_modules/@openchamber/sdk/dist/ui/checkbox.js
 var mountToggle = (root, initial, role) => {
@@ -2360,6 +2490,111 @@ var mountProgress = (root, initial) => {
     }
   };
 };
+// node_modules/@openchamber/sdk/dist/ui/menu.js
+var actions = (items) => items.filter((item) => !("separator" in item));
+var menuCount = 0;
+var mountMenu = (root, initial) => {
+  ensureStyle(UI_CSS);
+  let props = initial;
+  const uid = `oc-sdk-menu-${menuCount += 1}`;
+  const wrap = el("div", "oc-sdk oc-sdk-menu");
+  root.append(wrap);
+  const popup = el("div", "oc-sdk oc-sdk-popup");
+  popup.setAttribute("role", "menu");
+  popup.tabIndex = -1;
+  let closePopup = null;
+  let activeId = null;
+  const trigger = mountButton(wrap, {
+    label: props.label,
+    variant: props.variant,
+    size: props.size,
+    onClick: () => {
+      if (closePopup)
+        close();
+      else
+        open();
+    }
+  });
+  const triggerNode = wrap.querySelector("button");
+  triggerNode?.setAttribute("aria-haspopup", "menu");
+  const setActive = (id) => {
+    activeId = id;
+    highlightOption(popup, popup, uid, id);
+  };
+  const paintItems = () => {
+    clearNode(popup);
+    for (const item of props.items) {
+      if ("separator" in item) {
+        const line = el("div", "oc-sdk-separator");
+        line.dataset.labeled = "false";
+        popup.append(line);
+        continue;
+      }
+      popup.append(createOption(uid, "menuitem", item, {
+        hover: () => setActive(item.id),
+        pick: () => pick(item.id)
+      }));
+    }
+    setActive(actions(props.items).some((item) => item.id === activeId) ? activeId : null);
+  };
+  const close = () => {
+    const dispose = closePopup;
+    closePopup = null;
+    dispose?.();
+    activeId = null;
+    triggerNode?.setAttribute("aria-expanded", "false");
+  };
+  const open = () => {
+    if (closePopup || !triggerNode) {
+      return;
+    }
+    paintItems();
+    closePopup = openPopup(wrap, triggerNode, popup, close);
+    triggerNode.setAttribute("aria-expanded", "true");
+    popup.focus();
+  };
+  const pick = (id) => {
+    close();
+    triggerNode?.focus();
+    props.onSelect(id);
+  };
+  const onPopupKey = (event) => {
+    const step = navigationKey(event);
+    if (step) {
+      event.preventDefault();
+      setActive(moveListSelection(actions(props.items), activeId, step));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (activeId)
+        pick(activeId);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      close();
+      triggerNode?.focus();
+    }
+  };
+  const onFocusOut = (event) => {
+    if (closePopup && !(event.relatedTarget instanceof Node && wrap.contains(event.relatedTarget)))
+      close();
+  };
+  popup.addEventListener("keydown", onPopupKey);
+  wrap.addEventListener("focusout", onFocusOut);
+  return {
+    update: (next) => {
+      props = { ...props, ...next };
+      trigger.update({ label: props.label, variant: props.variant, size: props.size });
+      if (closePopup)
+        paintItems();
+    },
+    dispose: () => {
+      close();
+      popup.removeEventListener("keydown", onPopupKey);
+      wrap.removeEventListener("focusout", onFocusOut);
+      trigger.dispose();
+      wrap.remove();
+    }
+  };
+};
 // ui/shared/api.ts
 function errorText2(v) {
   if (typeof v === "string")
@@ -2455,6 +2690,14 @@ function validateThreshold(text) {
     return { ok: false, error: "Enter a whole number from 50 to 100." };
   return { ok: true, value: n };
 }
+function accountKind(v, now) {
+  const unavailable = v.state?.needsLogin || v.state?.limitedUntil != null && v.state.limitedUntil > now || v.available === false;
+  if (unavailable)
+    return { kind: "out", label: "Unavailable" };
+  if (v.poolActive)
+    return { kind: "use", label: "In use now" };
+  return { kind: "ready", label: "Available" };
+}
 
 // ui/panel/views.ts
 var el2 = (tag, cls = "", text = "") => {
@@ -2498,15 +2741,22 @@ function renderList(ctx, page) {
     return;
   const now = Date.now();
   const f = ctx.flows;
-  const head = el2("div", "row");
-  head.append(el2("strong", "grow", "Claude accounts"));
-  const refreshBtn = mountButton(head, { label: "Refresh", variant: "ghost", onClick: () => void ctx.run(async () => {}, refreshBtn) });
-  mountButton(head, { label: "Add account", disabled: f.adding !== null, onClick: () => {
+  const head = el2("div", "header");
+  const titles = el2("div", "grow");
+  titles.append(el2("h1", "title", "Claude Pool"), el2("div", "muted summary", poolSummary(data.accounts)));
+  head.append(titles);
+  mountButton(head, { label: "How it works", variant: "ghost", size: "sm", onClick: () => {
+    ctx.screen = { kind: "help" };
+    ctx.render();
+  } });
+  page.append(head);
+  const tools = el2("div", "row toolbar");
+  mountButton(tools, { label: "Add account", size: "sm", disabled: f.adding !== null, onClick: () => {
     ctx.notices.length = 0;
     f.adding = { name: "" };
     ctx.render();
   } });
-  const importBtn = mountButton(head, { label: "Import", variant: "outline", disabled: f.importing !== null, onClick: () => {
+  const importBtn = mountButton(tools, { label: "Import", variant: "outline", size: "sm", disabled: f.importing !== null, onClick: () => {
     ctx.run(async () => {
       const { candidates } = await ctx.client.candidates();
       if (candidates.length === 0)
@@ -2515,7 +2765,9 @@ function renderList(ctx, page) {
         f.importing = { candidates, selected: new Set };
     }, importBtn);
   } });
-  page.append(head);
+  tools.append(el2("span", "grow"));
+  const refreshBtn = mountButton(tools, { label: "Refresh", variant: "ghost", size: "sm", onClick: () => void ctx.run(async () => {}, refreshBtn) });
+  page.append(tools);
   if (f.adding)
     page.append(addRow(ctx));
   if (f.importing)
@@ -2523,8 +2775,39 @@ function renderList(ctx, page) {
   if (data.accounts.length === 0 && !f.adding) {
     mountEmpty(page, { title: "No accounts yet", body: "Add a Claude account, or import the ones Claude Code is already signed in to." });
   }
-  data.accounts.forEach((a, i) => page.append(accountCard(ctx, a, i, data.accounts, now)));
+  if (data.accounts.length > 0) {
+    const list = el2("div", "accounts");
+    data.accounts.forEach((a, i) => list.append(accountCard(ctx, a, i, data.accounts, now)));
+    page.append(list);
+  }
   page.append(thresholdBox(ctx, data.threshold));
+}
+function renderSkeleton(page) {
+  const sr = el2("span", "sr-only", "Loading…");
+  const head = el2("div", "header");
+  head.append(el2("div", "sk sk-title"));
+  const list = el2("div", "accounts");
+  for (let i = 0;i < 2; i++) {
+    const row = el2("div", "acct");
+    const top = el2("div", "row");
+    top.append(el2("span", "sk sk-dot"), el2("span", "sk sk-line"));
+    const usage = el2("div", "usage");
+    usage.append(el2("span", "sk sk-bar"), el2("span", "sk sk-bar"));
+    row.append(top, usage);
+    list.append(row);
+  }
+  page.append(sr, head, list);
+}
+function poolSummary(accounts) {
+  const enabled = accounts.filter((a) => a.enabled);
+  if (accounts.length === 0)
+    return "No accounts yet";
+  if (enabled.length === 0)
+    return "Every account is switched off";
+  const available = enabled.filter((a) => a.available !== false && !a.state?.needsLogin);
+  const next = enabled.find((a) => a.nextChat);
+  const count = `${available.length} of ${enabled.length} account${enabled.length === 1 ? "" : "s"} available`;
+  return next ? `${count} · new chats go to ${next.label}` : `${count} · none can take a new chat right now`;
 }
 function addRow(ctx) {
   const box = el2("div", "acct");
@@ -2595,23 +2878,74 @@ function importPanel(ctx) {
   return box;
 }
 function accountCard(ctx, a, index, all, now) {
-  const card = el2("div", "acct");
-  const top = el2("div", "row");
-  const name = el2("div", "grow");
-  name.append(el2("strong", "", a.label), el2("div", "muted", [a.email, a.plan && a.plan.toUpperCase()].filter(Boolean).join(" · ")));
-  top.append(name);
-  mountBadge(top, statusBadge(a, now));
-  card.append(top);
-  const bars = el2("div", "bars");
-  for (const [key, label] of [["five_hour", "5h"], ["seven_day", "7d"]]) {
-    bars.append(el2("span", "muted", label));
-    const cell = el2("div");
-    const pct = windowPercent(a.state, key, now);
-    mountProgress(cell, { value: pct, tone: pct >= 90 ? "error" : pct >= 70 ? "warning" : "primary" });
-    bars.append(cell, el2("span", "muted", `${Math.round(pct)}% ${resetText(a.state?.windows[key]?.resetsAt ?? null, now)}`.trim()));
-  }
-  card.append(bars);
+  const kind = a.enabled ? accountKind(a, now).kind : "off";
+  const card = el2("div", `acct ${kind}`);
   const f = ctx.flows;
+  const top = el2("div", "acct-top");
+  const dot = el2("span", `dot ${kind}`);
+  dot.setAttribute("aria-hidden", "true");
+  const who = el2("div", "who");
+  const line = el2("div", "name-line");
+  line.append(el2("span", "name", a.label));
+  if (a.state?.needsLogin) {
+    const b = mountButton(line, { label: "Sign in again", variant: "outline", size: "xs", onClick: () => void ctx.run(() => ctx.startLogin({ accountId: a.id }), b) });
+  } else
+    mountBadge(line, statusBadge(a, now));
+  who.append(line, el2("div", "muted meta", [a.email, a.plan && a.plan.toUpperCase()].filter(Boolean).join(" · ")));
+  const ctrl = el2("div", "acct-ctrl");
+  mountSwitch(ctrl, { label: "In pool", checked: a.enabled, onChange: (v) => void ctx.run(async () => {
+    await ctx.client.patch(a.id, { enabled: v });
+  }) });
+  const move = (from, to) => {
+    const ids = all.map((x) => x.id);
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    ctx.run(async () => {
+      await ctx.client.reorder(ids);
+    });
+  };
+  mountMenu(ctrl, {
+    label: "⋯",
+    variant: "ghost",
+    size: "xs",
+    items: [
+      { id: "rename", label: "Rename" },
+      { id: "up", label: "Move up", disabled: index === 0 },
+      { id: "down", label: "Move down", disabled: index === all.length - 1 },
+      { separator: true },
+      { id: "remove", label: "Remove", destructive: true }
+    ],
+    onSelect: (id) => {
+      if (id === "rename") {
+        f.renaming = { id: a.id, text: a.label };
+        f.removing = null;
+        ctx.render();
+      } else if (id === "up")
+        move(index, index - 1);
+      else if (id === "down")
+        move(index, index + 1);
+      else if (id === "remove") {
+        f.removing = { id: a.id, deleteLogin: false };
+        f.renaming = null;
+        ctx.render();
+      }
+    }
+  });
+  top.append(dot, who, ctrl);
+  card.append(top);
+  const usage = el2("div", "usage");
+  for (const [key, label] of [["five_hour", "5-hour"], ["seven_day", "Weekly"]]) {
+    const pct = windowPercent(a.state, key, now);
+    const reset = resetText(a.state?.windows[key]?.resetsAt ?? null, now);
+    const cell = el2("div", "win");
+    const head = el2("div", "win-head");
+    const left = el2("span", "win-label");
+    left.append(el2("span", "win-name", label), ...reset ? [el2("span", "muted small", reset)] : []);
+    head.append(left, el2("span", "pct", `${Math.round(pct)}%`));
+    cell.append(head);
+    mountProgress(cell, { value: pct, ...pct >= 90 ? { tone: "error" } : pct >= 70 ? { tone: "warning" } : {} });
+    usage.append(cell);
+  }
+  card.append(usage);
   if (f.renaming?.id === a.id) {
     card.append(renameRow(ctx, a));
     return card;
@@ -2620,35 +2954,6 @@ function accountCard(ctx, a, index, all, now) {
     card.append(removeRow(ctx, a));
     return card;
   }
-  const actions = el2("div", "row");
-  mountSwitch(actions, { label: "In pool", checked: a.enabled, onChange: (v) => void ctx.run(async () => {
-    await ctx.client.patch(a.id, { enabled: v });
-  }) });
-  if (a.state?.needsLogin) {
-    const b = mountButton(actions, { label: "Sign in again", size: "sm", onClick: () => void ctx.run(() => ctx.startLogin({ accountId: a.id }), b) });
-  }
-  mountButton(actions, { label: "Rename", variant: "ghost", size: "sm", onClick: () => {
-    f.renaming = { id: a.id, text: a.label };
-    f.removing = null;
-    ctx.render();
-  } });
-  const move = (from, to) => {
-    const ids = all.map((x) => x.id);
-    [ids[from], ids[to]] = [ids[to], ids[from]];
-    ctx.run(async () => {
-      await ctx.client.reorder(ids);
-    });
-  };
-  if (index > 0)
-    mountButton(actions, { label: "↑", variant: "ghost", size: "xs", onClick: () => move(index, index - 1) });
-  if (index < all.length - 1)
-    mountButton(actions, { label: "↓", variant: "ghost", size: "xs", onClick: () => move(index, index + 1) });
-  mountButton(actions, { label: "Remove", variant: "destructive", size: "sm", onClick: () => {
-    f.removing = { id: a.id, deleteLogin: false };
-    f.renaming = null;
-    ctx.render();
-  } });
-  card.append(actions);
   return card;
 }
 function renameRow(ctx, a) {
@@ -2710,20 +3015,23 @@ function removeRow(ctx, a) {
   return box;
 }
 function thresholdBox(ctx, saved) {
-  const box = el2("div", "acct");
+  const box = el2("section", "settings");
+  box.append(el2("h2", "section-title", "Switching"));
   const t = ctx.flows.threshold ??= { text: String(saved) };
-  const field = mountTextField(box, {
-    label: "Switch accounts at (% of the 5h or weekly window)",
+  const row = el2("div", "threshold-row");
+  const fieldWrap = el2("div", "threshold-field");
+  const field = mountTextField(fieldWrap, {
+    label: "Switch accounts at (%)",
     value: t.text,
     error: t.error,
-    helper: "50–100. The pool moves a conversation to another account once its account passes this.",
     onChange: (v) => {
       t.text = v;
       t.error = undefined;
       field.update({ value: v, error: undefined });
     }
   });
-  const save = mountButton(box, { label: "Save", variant: "secondary", size: "sm", onClick: () => {
+  row.append(fieldWrap);
+  const save = mountButton(row, { label: "Save", variant: "outline", onClick: () => {
     const v = validateThreshold(t.text);
     if (!v.ok) {
       t.error = v.error;
@@ -2739,7 +3047,166 @@ function thresholdBox(ctx, saved) {
       }
     }, save, { keepNotices: true });
   } });
+  box.append(row, el2("p", "muted small helper", "From 50 to 100. An account stops taking chats once its 5-hour or weekly usage passes this share; 100 uses it up to the real limit."));
   return box;
+}
+
+// ui/panel/help.ts
+var INTRO = "Claude Pool lets OpenChamber use several Claude subscriptions. Pick the Claude Pool provider and it chooses an account for you; pick “Claude · name” and it always uses that one account.";
+var FAQ = [
+  {
+    title: "Choosing an account",
+    items: [
+      {
+        q: "Which account does a new chat start on?",
+        a: [
+          "An account counts as available when it is switched on (“In pool”), signed in, not at a limit, and below the switch threshold in both its 5-hour and 7-day windows.",
+          "Among the available accounts a new chat gets the one with the most room left before the threshold, counted on its fuller window (5-hour or weekly). A tie goes to the account higher in the list (reorder with Move up / Move down in the account’s ⋯ menu).",
+          "The account marked “Next for new chats” is the one a new chat would get right now."
+        ]
+      },
+      {
+        q: "When does a running chat move to another account?",
+        a: [
+          "Never without a reason. A chat stays on its account, which keeps Claude's prompt cache warm and is cheaper, until that account passes the threshold or hits a limit.",
+          "The check happens when you send a message, not in the middle of an answer that is already streaming."
+        ]
+      },
+      {
+        q: "What happens to the conversation when it moves?",
+        a: [
+          "Its history is copied to the new account, so Claude keeps the context. The first message after a move has a cold cache: Claude reads the whole conversation again, which uses more of the new account's allowance than usual.",
+          "If an account refuses a message with a limit before it started answering, the same message is retried on the next account automatically and you will not notice. If the limit hits halfway through an answer, OpenChamber shows a retryable error and its automatic retry lands on the next account."
+        ]
+      },
+      {
+        q: "What do the status labels mean?",
+        a: [
+          "In use now: a conversation used this account in the last 5 minutes (or is streaming an answer).",
+          "Next for new chats: where the pool would send a new conversation.",
+          "Ready: available, but not the next pick.",
+          "Limited · 2h 10m: the account hit its limit and is skipped until then.",
+          "Sign in again: its login expired or was revoked. It is skipped until you sign in again.",
+          "Disabled: switched off with “In pool”. It is skipped and has no provider in the model picker."
+        ]
+      }
+    ]
+  },
+  {
+    title: "When accounts run out",
+    items: [
+      {
+        q: "What happens when every account is at its limit?",
+        a: [
+          "The pool answers “Every Claude Pool account is at its limit” and OpenChamber shows a countdown to the earliest moment one account frees up. Messages work again by themselves after that; there is nothing to click.",
+          "If no reset time is known (for example the accounts are signed out), it asks you to sign in again and suggests retrying in 10 minutes."
+        ]
+      },
+      {
+        q: "An account is under its real limit but the pool says everything is full. Why?",
+        a: [
+          "The pool treats an account as full once it passes the switch threshold (90% by default), not only at the hard limit, so a chat never runs an account completely dry.",
+          "To use accounts all the way to the limit, raise “Switch accounts at” to 100. Or pick “Claude · name” in the model picker: that provider ignores the pool and always uses its own account."
+        ]
+      },
+      {
+        q: "What does the switch threshold do?",
+        a: [
+          "It is the share (50 to 100%) of the 5-hour or weekly window at which an account stops being chosen. Lower values spread the load across accounts sooner; higher values drain one account before moving on. 90 is a sensible default."
+        ]
+      },
+      {
+        q: "Does the pool skip a window that has already reset?",
+        a: [
+          "Yes. Once a window's reset time has passed it counts as 0% used, even before fresh numbers arrive."
+        ]
+      }
+    ]
+  },
+  {
+    title: "Accounts and data",
+    items: [
+      {
+        q: "How do I add an account?",
+        a: [
+          "Add account: name it, sign in on the Claude page that opens, paste the code. Import finds Claude Code logins already on this computer (~/.claude and ~/.claude-*). Both need the Claude Code CLI (`claude`) to be installed.",
+          "Two entries for the same Claude account gain nothing, and the panel warns you if you add a duplicate."
+        ]
+      },
+      {
+        q: "Where do the usage numbers come from, and how fresh are they?",
+        a: [
+          "From Anthropic's usage endpoint, read with each account's own login, plus the rate-limit information Claude sends during chats. They refresh when you open this panel or press Refresh (at most every 45 seconds). Nothing polls in the background and no daemon is left running."
+        ]
+      },
+      {
+        q: "What do chat titles and summaries use?",
+        a: [
+          "The account the chat is already on, if it is available. They never move a chat to another account."
+        ]
+      },
+      {
+        q: "What does Remove do?",
+        a: [
+          "It takes the account out of the pool. A login folder you imported is never deleted. For accounts created here you can also tick “Also sign out and delete this account's folder”."
+        ]
+      },
+      {
+        q: "Is this safe for my login?",
+        a: [
+          "The extension only reads the login Claude Code stored on your computer. It never writes or refreshes tokens, never logs them, and signing in is done by the Claude CLI itself.",
+          "Anthropic's terms say plan limits assume ordinary individual use, and there are reports of accounts suspended for automatic rotation across several subscriptions. Decide whether the pool fits how you use your accounts. Per-account providers work without the pool."
+        ]
+      }
+    ]
+  },
+  {
+    title: "Troubleshooting",
+    items: [
+      {
+        q: "The panel says the Claude Code CLI was not found.",
+        a: [
+          "Install it (`npm install -g @anthropic-ai/claude-code` or the native installer) and make sure `claude` is on your PATH, then reopen the panel. Messages fail until it is installed."
+        ]
+      },
+      {
+        q: "I changed accounts but the model picker did not update.",
+        a: [
+          "The plugin watches the account list and updates its providers shortly after a change. If a provider is still missing, restart OpenChamber."
+        ]
+      },
+      {
+        q: "An account keeps showing “Sign in again”.",
+        a: [
+          "Press “Sign in again” on its card and finish the sign-in. A temporary failure to read a login (for example a denied Keychain prompt on macOS) does not mark an account as signed out."
+        ]
+      }
+    ]
+  }
+];
+function renderHelp(ctx, page) {
+  const head = el2("div", "header");
+  head.append(el2("h1", "title grow", "How Claude Pool works"));
+  mountButton(head, { label: "Back", variant: "ghost", size: "sm", onClick: () => {
+    ctx.screen = { kind: "list" };
+    ctx.render();
+  } });
+  page.append(head, el2("p", "intro", INTRO));
+  for (const group of FAQ) {
+    page.append(el2("h2", "section-title", group.title));
+    const list = el2("div", "faq");
+    for (const item of group.items) {
+      const d = document.createElement("details");
+      d.className = "faq-item";
+      d.append(el2("summary", "", item.q));
+      const body = el2("div", "faq-body");
+      for (const para of item.a)
+        body.append(el2("p", "", para));
+      d.append(body);
+      list.append(d);
+    }
+    page.append(list);
+  }
 }
 
 // ui/panel/login-flow.ts
@@ -2950,10 +3417,12 @@ function createPanel(host, root, opts = {}) {
         if (ctx.data)
           renderList(ctx, page);
         else if (ctx.loading)
-          mountSpinner(page, { label: "Loading…" });
+          renderSkeleton(page);
         else {
           const retry = mountButton(page, { label: "Try again", onClick: () => void ctx.run(async () => {}, retry) });
         }
+      } else if (ctx.screen.kind === "help") {
+        renderHelp(ctx, page);
       } else {
         renderNotices(ctx, page);
         renderLoginScreen(ctx, page);

@@ -2,7 +2,7 @@
 
 An [OpenChamber](https://github.com/openchamber/openchamber) extension that lets you use several Claude subscriptions (Pro or Max) at once. It adds a failover **pool** provider, one provider per account, a panel to add and manage accounts, a usage card with a group per account, and a Work Status section with a 5h bar per enabled account.
 
-Status: 0.2.3, not yet published.
+Status: 0.3.0, not yet published.
 
 ## Requirements
 
@@ -29,9 +29,11 @@ Open the **Claude Pool** panel.
 - **Import**: lists the existing Claude Code logins on this computer (`~/.claude` and `~/.claude-*`). Tick the ones you want and import them. Logins that are not a Claude subscription, or are already in the pool, are skipped with a reason.
 - **Add account**: type a name (names must be unique), press Start, sign in on the Claude page that opens, and paste the code it shows. A wrong code on a new account cancels that sign-in: the panel shows a "Sign-in failed" banner with a Back button, the half-created account and its folder are discarded, and you press "Add account" again to retry. A wrong code for an existing account ("Sign in again") leaves that account untouched. New accounts get their own folder in `~/.claude-pool/accounts/<id>`.
 
-Other panel actions: turn an account on or off ("In pool"), rename, reorder (↑ ↓) and remove. Removing never deletes a login folder unless you tick "Also sign out and delete this account's folder", and that box only appears for folders the pool created. For those, `claude auth logout` is run before the folder is deleted. Folders you imported are never deleted.
+Other panel actions: turn an account on or off ("In pool"), and from the "⋯" menu on each account rename, reorder (Move up / Move down) and remove. Removing never deletes a login folder unless you tick "Also sign out and delete this account's folder", and that box only appears for folders the pool created. For those, `claude auth logout` is run before the folder is deleted. Folders you imported are never deleted.
 
 ## Using it
+
+The panel has a **How it works** button that opens this section as a FAQ inside OpenChamber: which account a new chat gets, when a chat moves, what happens when every account is at its limit, what the labels and the threshold mean.
 
 The model picker shows these providers only when at least one account is enabled:
 
@@ -49,7 +51,7 @@ How the pool behaves:
 
 Settings → Usage (menu name from the plan; not yet confirmed in OpenChamber) shows one **Claude Pool** card: on top the 5h and 7d windows of the account the pool would use now (labelled with its name), then a group per enabled account that has usage data. A group says "(sign in again)" for an account that needs a new login, "(limited)" while it is at a limit, and "(data N min old)" when its numbers could not be refreshed. The built-in Claude card keeps showing the default Claude Code account; you can hide it in Settings → Usage (menu name from the plan; not yet confirmed in OpenChamber).
 
-The Work Status section "Claude Pool" has one row per enabled account with a 5h bar, a ● marker on the account the pool would use now, and a ↻ button to refresh.
+The Work Status section "Claude Pool" has one row per enabled account with its 5-hour and 7-day windows (share used, reset time and a thin bar), a colored dot for its state, and a footer with the time of the last update and a ↻ button to refresh.
 
 ## How it works
 
@@ -70,7 +72,7 @@ This is an independent community project, not affiliated with or endorsed by Ant
 
 - **macOS**: reads each account's Keychain item (the default folder uses `Claude Code-credentials`; other folders use a name derived from the folder path), falling back to the folder's `.credentials.json`. The first read may show a Keychain prompt.
 - **Windows**: reads `<folder>\.credentials.json`.
-- **Panel controls**: accounts are reordered with up/down buttons and the switch threshold is a text field (the design envisaged drag and drop and a slider).
+- **Panel controls**: accounts are reordered with Move up / Move down in the "⋯" menu and the switch threshold is a text field (the design envisaged drag and drop and a slider).
 
 Windows status: the code paths are written for Windows. On windows-latest CI runs the shared, service and UI tests and the pool-specific plugin tests (`bun run test:plugin:windows`); the full plugin suite, whose forked tests use shell-script fake CLIs and symlinks, runs on macOS only. It has not been verified on a real Windows machine with real accounts. The UI has been tested headlessly (happy-dom), not yet visually in OpenChamber. The macOS end-to-end check in [docs/e2e-checklist.md](docs/e2e-checklist.md) is still to be run.
 

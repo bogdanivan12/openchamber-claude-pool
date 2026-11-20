@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Panel redesign: a header with a one-line pool summary (how many accounts are available and where a new chat goes); all accounts on one surface split by hairlines instead of separate cards; per account a status dot, the badge next to the name, the "In pool" switch and a "⋯" menu (Rename, Move up, Move down, Remove); 5-hour and weekly usage one under the other (like the Work Status widget), each with its reset time beside the label, neutral until 70%, then warning and error; "Sign in again" takes the badge's place on a signed-out account; a "Switching" section for the threshold; skeleton rows while loading.
+- Work Status widget polished (same labels, clock-style resets and 50% / 80% tones as the built-in Usage block): a thin bar under every window, hairlines between accounts, the ↻ button moved to a footer with the time of the last update so it no longer overlaps the first account, skeleton rows while loading.
+- New **How it works** button in the panel: a FAQ explaining how an account is chosen, when a chat moves and what happens to its history, what happens when every account is at its limit, what the labels and the threshold mean, where the numbers come from, and basic troubleshooting.
+
 ## 0.2.3
 
 - Fix: "Bun is not defined" when OpenChamber's built-in OpenCode (which runs on Node, not Bun) starts the plugin's proxy. The proxy now uses `Bun.serve` under Bun and a `node:http` server otherwise. Restart OpenChamber to load the updated plugin.

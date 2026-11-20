@@ -17,6 +17,18 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = "") 
 };
 
 const line = (text: string, cls = "muted") => el("span", `line ${cls}`, text);
+
+/** Two placeholder rows in the shape of an account, with the word for screen readers. */
+function skeleton(): HTMLElement {
+  const wrap = el("div", "skeleton");
+  wrap.append(el("span", "sr-only", "Loading…"));
+  for (let i = 0; i < 2; i++) {
+    const r = el("div", "sk-row");
+    r.append(el("span", "sk sk-name"), el("span", "sk sk-bar"), el("span", "sk sk-bar"));
+    wrap.append(r);
+  }
+  return wrap;
+}
 const MIN_HEIGHT = 24;
 
 const clock = (t: number, withDay: boolean): string => {
@@ -25,7 +37,7 @@ const clock = (t: number, withDay: boolean): string => {
   return withDay ? `${d.toLocaleDateString("en-US", { weekday: "short" })} ${time}` : time;
 };
 
-/** One usage line in the look of the built-in Usage block: small label, reset time, then the used share. */
+/** One usage line in the look of the built-in Usage block: small label, reset time, the used share, then a thin bar. */
 function windowLine(label: string, a: AccountView, name: "five_hour" | "seven_day", now: number): HTMLElement | null {
   const w = a.state?.windows[name];
   if (!w) return null;
@@ -33,9 +45,16 @@ function windowLine(label: string, a: AccountView, name: "five_hour" | "seven_da
   const left = el("span", "win-label");
   left.append(el("span", "", label));
   if (w.resetsAt !== null && w.resetsAt > now) left.append(el("span", "win-reset", clock(w.resetsAt, name === "seven_day")));
-  const tone = percent >= 80 ? "pct pct-error" : percent >= 50 ? "pct pct-warning" : "pct";
+  const level = percent >= 80 ? "error" : percent >= 50 ? "warning" : "";
+  const top = el("div", "win-line");
+  top.append(left, el("span", level ? `pct pct-${level}` : "pct", `${percent}%`));
+  const bar = el("div", "bar");
+  bar.setAttribute("aria-hidden", "true");
+  const fill = el("span", level ? `fill fill-${level}` : "fill");
+  fill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  bar.append(fill);
   const l = el("div", "win");
-  l.append(left, el("span", tone, `${percent}%`));
+  l.append(top, bar);
   return l;
 }
 
@@ -73,13 +92,16 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
   let seq = 0;
 
   const body = el("div", "list");
+  const foot = el("div", "foot");
+  const updated = el("span", "updated", "");
   const refresh = el("button", "refresh", "↻");
   refresh.type = "button";
   refresh.title = "Refresh";
   refresh.setAttribute("aria-label", "Refresh");
   refresh.addEventListener("click", () => void load());
-  root.replaceChildren(body, refresh);
-  body.append(line("Loading…"));
+  foot.append(updated, refresh);
+  root.replaceChildren(body, foot);
+  body.append(skeleton());
 
   async function reportHeight(): Promise<void> {
     try {
@@ -109,6 +131,7 @@ export function createStatus(host: StatusHost, root: Element, opts: { now?: () =
     }
     if (mine !== seq) return; // a newer refresh is in flight
     refresh.disabled = false;
+    updated.textContent = `Updated ${clock(now(), false)}`;
     body.replaceChildren(...children);
     await reportHeight();
   }

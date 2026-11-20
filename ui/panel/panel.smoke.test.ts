@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, mock } from "bun
 import { createPanel } from "./app.ts";
 import type { Ctx } from "./ctx.ts";
 import { VERIFY_MAX_POLLS } from "./login-flow.ts";
-import { account, buttonLabels, click, fieldNote, FakeService, findButton, installDom, makeHost, settle, text, typeInto, uninstallDom } from "./test-helpers.ts";
+import { account, buttonLabels, click, menu, fieldNote, FakeService, findButton, installDom, makeHost, settle, text, typeInto, uninstallDom } from "./test-helpers.ts";
 
 const NOW = Date.now();
 let currentHost: ReturnType<typeof makeHost>["host"];
@@ -192,7 +192,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
   it("remove is two-step and sends deleteLogin only when ticked and allowed", async () => {
     svc.accounts = [account("a1", "work", { canDeleteLogin: true }), account("a2", "home")];
     await open();
-    await click(root, "Remove"); // first card
+    await menu(root, "Remove", 0);
     expect(text(root)).toContain("Remove work?");
     expect(svc.find("DELETE", "/api/accounts/a1")).toHaveLength(0);
     const box = Array.from(root.querySelectorAll("[role=checkbox]")).find((b) => b.textContent?.includes("Also sign out")) as HTMLElement;
@@ -205,7 +205,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     await settle();
     expect(svc.find("DELETE", "/api/accounts/a1")[0].query).toEqual({ deleteLogin: "1" });
     // account without canDeleteLogin: no checkbox, no deleteLogin
-    await click(root, "Remove");
+    await menu(root, "Remove", 0);
     expect(text(root)).toContain("Remove home?");
     expect(root.querySelector("[role=checkbox]")).toBeNull();
     const confirm2 = Array.from(root.querySelectorAll("button")).filter((b) => b.textContent?.trim() === "Remove")[0] as HTMLButtonElement;
@@ -217,7 +217,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
   it("remove can be cancelled without a request", async () => {
     svc.accounts = [account("a1", "work")];
     await open();
-    await click(root, "Remove");
+    await menu(root, "Remove");
     await click(root, "Cancel");
     expect(svc.requests.filter((r) => r.method === "DELETE")).toHaveLength(0);
     expect(text(root)).not.toContain("Remove work?");
@@ -255,7 +255,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
   it("rename: a duplicate name shows the service error, typing clears it, a valid name saves", async () => {
     svc.accounts = [account("a1", "work"), account("a2", "home")];
     await open();
-    await click(root, "Rename"); // first card (work)
+    await menu(root, "Rename", 0);
     await typeInto(root, "New name", "home");
     await click(root, "Save");
     expect(fieldNote(root, "New name")).toContain('There is already an account called "home"');
@@ -288,7 +288,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     sw.click();
     await settle();
     expect(svc.find("PATCH", "/api/accounts/a1")[0].body).toEqual({ enabled: false });
-    await click(root, "↓");
+    await menu(root, "Move down", 0);
     expect(svc.find("POST", "/api/accounts/reorder")[0].body).toEqual({ ids: ["a2", "a1"] });
     const before = svc.find("GET", "/api/accounts").length;
     await click(root, "Refresh");
@@ -310,7 +310,7 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     svc.accounts = [account("a1", "work")];
     await open();
     svc.accounts = [];
-    await click(root, "Remove");
+    await menu(root, "Remove");
     await click(root, "Remove");
     expect(text(root)).toContain("That did not work");
     expect(text(root)).toContain("No such account");
@@ -349,6 +349,30 @@ describe("panel smoke test (happy-dom, fake service)", () => {
     h.ready("/project/b");
     await settle();
     expect(n()).toBe(before + 1);
+  });
+
+  it("the header summarises the pool and says where a new chat goes", async () => {
+    svc.accounts = [account("a1", "work", { nextChat: true, available: true }), account("a2", "home", { available: false })];
+    await open();
+    expect(text(root)).toContain("1 of 2 accounts available · new chats go to work");
+  });
+
+  it("How it works opens the FAQ with the key answers and Back returns to the list", async () => {
+    svc.accounts = [account("a1", "work")];
+    await open();
+    await click(root, "How it works");
+    const t = text(root);
+    expect(t).toContain("How Claude Pool works");
+    expect(t).toContain("Which account does a new chat start on?");
+    expect(t).toContain("What happens when every account is at its limit?");
+    expect(root.querySelectorAll("details").length).toBeGreaterThanOrEqual(10);
+    expect(buttonLabels(root)).not.toContain("Add account");
+    // a refresh while reading must not throw the reader back to the list
+    ctx.screen.kind === "help" && (await ctx.refresh());
+    expect(text(root)).toContain("How Claude Pool works");
+    await click(root, "Back");
+    expect(buttonLabels(root)).toContain("Add account");
+    expect(text(root)).not.toContain("How Claude Pool works");
   });
 
   it("the real entry (main.ts) mounts through the mocked connectHost", async () => {

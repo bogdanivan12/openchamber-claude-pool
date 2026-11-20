@@ -23,6 +23,7 @@ export type AwaitingCode = Extract<LoginView, { state: "awaiting-code" }>;
 /** Which full-page screen is showing. The list is the default. */
 export type Screen =
   | { kind: "list" }
+  | { kind: "help" }
   | { kind: "awaiting-code"; view: AwaitingCode; isNew: boolean; code: string; error?: string }
   | { kind: "verifying"; message?: string }
   | { kind: "failed"; message: string };

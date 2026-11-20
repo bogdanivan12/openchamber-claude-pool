@@ -1,5 +1,5 @@
-import { mountBadge, mountBanner, mountButton, mountCheckbox, mountEmpty, mountProgress, mountSwitch, mountTextField } from "@openchamber/sdk/ui";
-import { resetText, statusBadge, validateThreshold, windowPercent, type AccountView } from "../shared/format.ts";
+import { mountBadge, mountBanner, mountButton, mountCheckbox, mountEmpty, mountMenu, mountProgress, mountSwitch, mountTextField } from "@openchamber/sdk/ui";
+import { accountKind, resetText, statusBadge, validateThreshold, windowPercent, type AccountView } from "../shared/format.ts";
 import type { Ctx } from "./ctx.ts";
 
 export const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text = "") => {
@@ -44,18 +44,25 @@ export function renderList(ctx: Ctx, page: HTMLElement): void {
   const now = Date.now();
   const f = ctx.flows;
 
-  const head = el("div", "row");
-  head.append(el("strong", "grow", "Claude accounts"));
-  const refreshBtn = mountButton(head, { label: "Refresh", variant: "ghost", onClick: () => void ctx.run(async () => {}, refreshBtn) });
-  mountButton(head, { label: "Add account", disabled: f.adding !== null, onClick: () => { ctx.notices.length = 0; f.adding = { name: "" }; ctx.render(); } });
-  const importBtn = mountButton(head, { label: "Import", variant: "outline", disabled: f.importing !== null, onClick: () => {
+  const head = el("div", "header");
+  const titles = el("div", "grow");
+  titles.append(el("h1", "title", "Claude Pool"), el("div", "muted summary", poolSummary(data.accounts)));
+  head.append(titles);
+  mountButton(head, { label: "How it works", variant: "ghost", size: "sm", onClick: () => { ctx.screen = { kind: "help" }; ctx.render(); } });
+  page.append(head);
+
+  const tools = el("div", "row toolbar");
+  mountButton(tools, { label: "Add account", size: "sm", disabled: f.adding !== null, onClick: () => { ctx.notices.length = 0; f.adding = { name: "" }; ctx.render(); } });
+  const importBtn = mountButton(tools, { label: "Import", variant: "outline", size: "sm", disabled: f.importing !== null, onClick: () => {
     void ctx.run(async () => {
       const { candidates } = await ctx.client.candidates();
       if (candidates.length === 0) ctx.notify({ tone: "info", title: "Nothing to import", body: "No other Claude Code logins were found in your home folder." });
       else f.importing = { candidates, selected: new Set() };
     }, importBtn);
   } });
-  page.append(head);
+  tools.append(el("span", "grow"));
+  const refreshBtn = mountButton(tools, { label: "Refresh", variant: "ghost", size: "sm", onClick: () => void ctx.run(async () => {}, refreshBtn) });
+  page.append(tools);
 
   if (f.adding) page.append(addRow(ctx));
   if (f.importing) page.append(importPanel(ctx));
@@ -63,8 +70,41 @@ export function renderList(ctx: Ctx, page: HTMLElement): void {
   if (data.accounts.length === 0 && !f.adding) {
     mountEmpty(page, { title: "No accounts yet", body: "Add a Claude account, or import the ones Claude Code is already signed in to." });
   }
-  data.accounts.forEach((a, i) => page.append(accountCard(ctx, a, i, data.accounts, now)));
+  if (data.accounts.length > 0) {
+    const list = el("div", "accounts");
+    data.accounts.forEach((a, i) => list.append(accountCard(ctx, a, i, data.accounts, now)));
+    page.append(list);
+  }
   page.append(thresholdBox(ctx, data.threshold));
+}
+
+/** Placeholder rows in the shape of the account list, shown until the first answer. */
+export function renderSkeleton(page: HTMLElement): void {
+  const sr = el("span", "sr-only", "Loading…");
+  const head = el("div", "header");
+  head.append(el("div", "sk sk-title"));
+  const list = el("div", "accounts");
+  for (let i = 0; i < 2; i++) {
+    const row = el("div", "acct");
+    const top = el("div", "row");
+    top.append(el("span", "sk sk-dot"), el("span", "sk sk-line"));
+    const usage = el("div", "usage");
+    usage.append(el("span", "sk sk-bar"), el("span", "sk sk-bar"));
+    row.append(top, usage);
+    list.append(row);
+  }
+  page.append(sr, head, list);
+}
+
+/** One line under the title: how many accounts the pool can use, and where a new chat would go. */
+export function poolSummary(accounts: AccountView[]): string {
+  const enabled = accounts.filter((a) => a.enabled);
+  if (accounts.length === 0) return "No accounts yet";
+  if (enabled.length === 0) return "Every account is switched off";
+  const available = enabled.filter((a) => a.available !== false && !a.state?.needsLogin);
+  const next = enabled.find((a) => a.nextChat);
+  const count = `${available.length} of ${enabled.length} account${enabled.length === 1 ? "" : "s"} available`;
+  return next ? `${count} · new chats go to ${next.label}` : `${count} · none can take a new chat right now`;
 }
 
 function addRow(ctx: Ctx): HTMLElement {
@@ -108,43 +148,64 @@ function importPanel(ctx: Ctx): HTMLElement {
 }
 
 function accountCard(ctx: Ctx, a: AccountView, index: number, all: AccountView[], now: number): HTMLElement {
-  const card = el("div", "acct");
-  const top = el("div", "row");
-  const name = el("div", "grow");
-  name.append(el("strong", "", a.label), el("div", "muted", [a.email, a.plan && a.plan.toUpperCase()].filter(Boolean).join(" · ")));
-  top.append(name);
-  mountBadge(top, statusBadge(a, now));
-  card.append(top);
-
-  const bars = el("div", "bars");
-  for (const [key, label] of [["five_hour", "5h"], ["seven_day", "7d"]] as const) {
-    bars.append(el("span", "muted", label));
-    const cell = el("div");
-    const pct = windowPercent(a.state, key, now);
-    mountProgress(cell, { value: pct, tone: pct >= 90 ? "error" : pct >= 70 ? "warning" : "primary" });
-    bars.append(cell, el("span", "muted", `${Math.round(pct)}% ${resetText(a.state?.windows[key]?.resetsAt ?? null, now)}`.trim()));
-  }
-  card.append(bars);
-
+  const kind = a.enabled ? accountKind(a, now).kind : "off";
+  const card = el("div", `acct ${kind}`);
   const f = ctx.flows;
-  if (f.renaming?.id === a.id) { card.append(renameRow(ctx, a)); return card; }
-  if (f.removing?.id === a.id) { card.append(removeRow(ctx, a)); return card; }
 
-  const actions = el("div", "row");
-  mountSwitch(actions, { label: "In pool", checked: a.enabled, onChange: (v) => void ctx.run(async () => { await ctx.client.patch(a.id, { enabled: v }); }) });
+  const top = el("div", "acct-top");
+  const dot = el("span", `dot ${kind}`);
+  dot.setAttribute("aria-hidden", "true");
+  const who = el("div", "who");
+  const line = el("div", "name-line");
+  line.append(el("span", "name", a.label));
+  // A signed-out account shows its fix instead of a badge that says the same thing.
   if (a.state?.needsLogin) {
-    const b = mountButton(actions, { label: "Sign in again", size: "sm", onClick: () => void ctx.run(() => ctx.startLogin({ accountId: a.id }), b) });
-  }
-  mountButton(actions, { label: "Rename", variant: "ghost", size: "sm", onClick: () => { f.renaming = { id: a.id, text: a.label }; f.removing = null; ctx.render(); } });
+    const b = mountButton(line, { label: "Sign in again", variant: "outline", size: "xs", onClick: () => void ctx.run(() => ctx.startLogin({ accountId: a.id }), b) });
+  } else mountBadge(line, statusBadge(a, now));
+  who.append(line, el("div", "muted meta", [a.email, a.plan && a.plan.toUpperCase()].filter(Boolean).join(" · ")));
+  const ctrl = el("div", "acct-ctrl");
+  mountSwitch(ctrl, { label: "In pool", checked: a.enabled, onChange: (v) => void ctx.run(async () => { await ctx.client.patch(a.id, { enabled: v }); }) });
   const move = (from: number, to: number) => {
     const ids = all.map((x) => x.id);
     [ids[from], ids[to]] = [ids[to], ids[from]];
     void ctx.run(async () => { await ctx.client.reorder(ids); });
   };
-  if (index > 0) mountButton(actions, { label: "↑", variant: "ghost", size: "xs", onClick: () => move(index, index - 1) });
-  if (index < all.length - 1) mountButton(actions, { label: "↓", variant: "ghost", size: "xs", onClick: () => move(index, index + 1) });
-  mountButton(actions, { label: "Remove", variant: "destructive", size: "sm", onClick: () => { f.removing = { id: a.id, deleteLogin: false }; f.renaming = null; ctx.render(); } });
-  card.append(actions);
+  mountMenu(ctrl, {
+    label: "⋯", variant: "ghost", size: "xs",
+    items: [
+      { id: "rename", label: "Rename" },
+      { id: "up", label: "Move up", disabled: index === 0 },
+      { id: "down", label: "Move down", disabled: index === all.length - 1 },
+      { separator: true },
+      { id: "remove", label: "Remove", destructive: true },
+    ],
+    onSelect: (id) => {
+      if (id === "rename") { f.renaming = { id: a.id, text: a.label }; f.removing = null; ctx.render(); }
+      else if (id === "up") move(index, index - 1);
+      else if (id === "down") move(index, index + 1);
+      else if (id === "remove") { f.removing = { id: a.id, deleteLogin: false }; f.renaming = null; ctx.render(); }
+    },
+  });
+  top.append(dot, who, ctrl);
+  card.append(top);
+
+  const usage = el("div", "usage");
+  for (const [key, label] of [["five_hour", "5-hour"], ["seven_day", "Weekly"]] as const) {
+    const pct = windowPercent(a.state, key, now);
+    const reset = resetText(a.state?.windows[key]?.resetsAt ?? null, now);
+    const cell = el("div", "win");
+    const head = el("div", "win-head");
+    const left = el("span", "win-label");
+    left.append(el("span", "win-name", label), ...(reset ? [el("span", "muted small", reset)] : []));
+    head.append(left, el("span", "pct", `${Math.round(pct)}%`));
+    cell.append(head);
+    mountProgress(cell, { value: pct, ...(pct >= 90 ? { tone: "error" as const } : pct >= 70 ? { tone: "warning" as const } : {}) });
+    usage.append(cell);
+  }
+  card.append(usage);
+
+  if (f.renaming?.id === a.id) { card.append(renameRow(ctx, a)); return card; }
+  if (f.removing?.id === a.id) { card.append(removeRow(ctx, a)); return card; }
   return card;
 }
 
@@ -188,16 +249,19 @@ function removeRow(ctx: Ctx, a: AccountView): HTMLElement {
 }
 
 function thresholdBox(ctx: Ctx, saved: number): HTMLElement {
-  const box = el("div", "acct");
+  const box = el("section", "settings");
+  box.append(el("h2", "section-title", "Switching"));
   const t = (ctx.flows.threshold ??= { text: String(saved) });
-  const field = mountTextField(box, {
-    label: "Switch accounts at (% of the 5h or weekly window)",
+  const row = el("div", "threshold-row");
+  const fieldWrap = el("div", "threshold-field");
+  const field = mountTextField(fieldWrap, {
+    label: "Switch accounts at (%)",
     value: t.text,
     error: t.error,
-    helper: "50–100. The pool moves a conversation to another account once its account passes this.",
     onChange: (v) => { t.text = v; t.error = undefined; field.update({ value: v, error: undefined }); },
   });
-  const save = mountButton(box, { label: "Save", variant: "secondary", size: "sm", onClick: () => {
+  row.append(fieldWrap);
+  const save = mountButton(row, { label: "Save", variant: "outline", onClick: () => {
     const v = validateThreshold(t.text);
     if (!v.ok) { t.error = v.error; field.update({ error: v.error }); return; }
     void ctx.run(async () => {
@@ -205,5 +269,6 @@ function thresholdBox(ctx: Ctx, saved: number): HTMLElement {
       catch (e) { t.error = (e as Error).message; }
     }, save, { keepNotices: true });
   } });
+  box.append(row, el("p", "muted small helper", "From 50 to 100. An account stops taking chats once its 5-hour or weekly usage passes this share; 100 uses it up to the real limit."));
   return box;
 }
